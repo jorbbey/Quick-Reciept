@@ -1,0 +1,6 @@
+{
+  "name": "Quick Receipt",
+  "description": "The fastest receipt and invoice engine for online business owners and sellers. Create and send professional, customized sales invoices and receipts to your customers in just 10 seconds. No login required, instant WhatsApp sharing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <link rel="icon" type="image/png" href="https://hectvnfwjxkexfoxcohj.supabase.co/storage/v1/object/public/media-files/quick_logo.png" />
+    <title>Quick Receipt - Create Invoices &amp; Receipts in 10 Seconds</title>
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="The fastest receipt and invoice engine for online business owners and sellers. Create and send professional, customized sales invoices and receipts to your customers in just 10 seconds. No login required, instant WhatsApp sharing." />
+    <meta name="keywords" content="invoice generator, receipt maker, online sellers invoicing, WhatsApp receipts, SME billing tool, free invoice creator, social commerce receipts, digital invoice Lagos, Nigerian online business, Quick Receipt PWA" />
+    <meta name="author" content="Quick Receipt" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://quickreceipt.pro/" />
+    <meta property="og:title" content="Quick Receipt - Invoices &amp; Receipts in 10 Seconds" />
+    <meta property="og:description" content="Quickly generate and share professional invoices and receipts with your customers. Designed specifically for online business owners and social sellers. Instant WhatsApp sharing." />
+    <meta property="og:image" content="https://hectvnfwjxkexfoxcohj.supabase.co/storage/v1/object/public/media-files/quick_logo.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="Quick Receipt - Invoices &amp; Receipts in 10 Seconds" />
+    <meta property="twitter:description" content="Quickly generate and share professional invoices and receipts with your customers. Designed specifically for online business owners and social sellers. Instant WhatsApp sharing." />
+    <meta property="twitter:image" content="https://hectvnfwjxkexfoxcohj.supabase.co/storage/v1/object/public/media-files/quick_logo.png" />
+
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Quick Receipt" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(registration => {
+            console.log('SW registered: ', registration);
+          }).catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
+
