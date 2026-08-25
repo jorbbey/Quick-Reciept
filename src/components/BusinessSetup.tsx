@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Camera, X, Landmark, FileText, CreditCard, ShieldAlert, DownloadCloud, Database } from 'lucide-react';
+import { Camera, X, Landmark, FileText, CreditCard, ShieldAlert, DownloadCloud, Database, Lock, KeyRound, CheckCircle2, LogOut, UserCheck, Loader2 } from 'lucide-react';
 import { BusinessInfo, Receipt } from '../types';
+import { updatePassword, signOut } from '../lib/analytics';
 import JSZip from 'jszip';
 
 interface BusinessSetupProps {
@@ -10,9 +11,10 @@ interface BusinessSetupProps {
   receipts: Receipt[];
   user?: any;
   onOpenAuth?: () => void;
+  onSignOut?: () => void;
 }
 
-export default function BusinessSetup({ initialData, onSave, onCancel, receipts, user, onOpenAuth }: BusinessSetupProps) {
+export default function BusinessSetup({ initialData, onSave, onCancel, receipts, user, onOpenAuth, onSignOut }: BusinessSetupProps) {
   const [name, setName] = useState(initialData?.name || '');
   const [phone, setPhone] = useState(initialData?.phone || '');
   const [address, setAddress] = useState(initialData?.address || '');
@@ -29,6 +31,42 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
   const [accountNumber, setAccountNumber] = useState(initialData?.accountNumber || '');
   const [paymentInfo, setPaymentInfo] = useState(initialData?.paymentInfo || '');
   const [termsConditions, setTermsConditions] = useState(initialData?.termsConditions || '');
+
+  // Password Change state
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(false);
+
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setPasswordError('Passwords do not match. Please verify.');
+      return;
+    }
+
+    setPasswordLoading(true);
+    const { error } = await updatePassword(newPassword);
+
+    if (error) {
+      setPasswordError(error.message);
+    } else {
+      setPasswordSuccess(true);
+      setNewPassword('');
+      setConfirmNewPassword('');
+    }
+    setPasswordLoading(false);
+  };
 
   const handleBackup = async () => {
     const zip = new JSZip();
@@ -130,6 +168,113 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
           >
             Sign In / Log In
           </button>
+        </div>
+      )}
+
+      {user && (
+        <div className="mb-8 p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <UserCheck size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <span>{user.email}</span>
+                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-black uppercase tracking-wider">
+                    Unlimited
+                  </span>
+                </p>
+                <p className="text-[11px] text-slate-500 font-medium">Account active • Cloud auto-sync enabled</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPasswordChange(!showPasswordChange)}
+                className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <KeyRound size={14} />
+                <span>{showPasswordChange ? 'Cancel' : 'Change Password'}</span>
+              </button>
+
+              {onSignOut && (
+                <button
+                  type="button"
+                  onClick={onSignOut}
+                  className="px-3.5 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                >
+                  <LogOut size={14} />
+                  <span>Sign Out</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {showPasswordChange && (
+            <form onSubmit={handlePasswordChange} className="pt-4 border-t border-slate-200 space-y-3">
+              <p className="text-xs font-bold text-slate-800 uppercase tracking-wider">Update Account Password</p>
+              
+              {passwordError && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-bold">
+                  {passwordError}
+                </div>
+              )}
+
+              {passwordSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2">
+                  <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                  <span>Password updated successfully!</span>
+                </div>
+              )}
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">New Password</label>
+                  <div className="relative">
+                    <input
+                      required
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    />
+                    <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Confirm New Password</label>
+                  <div className="relative">
+                    <input
+                      required
+                      type="password"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="Repeat new password"
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    />
+                    <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={passwordLoading}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+              >
+                {passwordLoading ? (
+                  <Loader2 className="animate-spin" size={14} />
+                ) : (
+                  <KeyRound size={14} />
+                )}
+                <span>Update Password</span>
+              </button>
+            </form>
+          )}
         </div>
       )}
 

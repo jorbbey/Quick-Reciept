@@ -2,6 +2,130 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function() {
+        function isNoise(val) {
+          if (!val) return false;
+          var str = '';
+          try {
+            if (typeof val === 'string') {
+              str = val;
+            } else if (val instanceof Error) {
+              str = (val.message || '') + ' ' + (val.stack || '') + ' ' + (val.name || '');
+            } else if (typeof val === 'object') {
+              str = (val.message || '') + ' ' + 
+                    (val.reason && val.reason.message ? val.reason.message : '') + ' ' + 
+                    (val.reason ? String(val.reason) : '') + ' ' +
+                    (val.description || '') + ' ' + 
+                    (val.data ? (typeof val.data === 'string' ? val.data : JSON.stringify(val.data)) : '') + ' ' +
+                    (val.detail ? (typeof val.detail === 'string' ? val.detail : JSON.stringify(val.detail)) : '') + ' ' +
+                    (val.target && val.target.src ? val.target.src : '') + ' ' + 
+                    (val.filename || '') + ' ' +
+                    JSON.stringify(val);
+            } else {
+              str = String(val);
+            }
+          } catch (e) {
+            try { str = String(val); } catch (e2) { str = ''; }
+          }
+          return /metamask|ethereum|web3|wallet|chrome-extension|moz-extension|evmAsk|coinbase|phantom/i.test(str);
+        }
+
+        // Safe Dummy Ethereum Provider to satisfy injected web3 scripts without connection failure
+        var dummyEth = {
+          isMetaMask: true,
+          isConnected: function() { return false; },
+          enable: function() { return Promise.resolve([]); },
+          request: function(args) { return Promise.resolve(null); },
+          send: function(method, params) { return Promise.resolve({ jsonrpc: '2.0', id: 1, result: null }); },
+          sendAsync: function(payload, cb) { if (typeof cb === 'function') cb(null, { jsonrpc: '2.0', id: payload && payload.id, result: null }); },
+          on: function() { return dummyEth; },
+          once: function() { return dummyEth; },
+          off: function() { return dummyEth; },
+          addListener: function() { return dummyEth; },
+          removeListener: function() { return dummyEth; },
+          removeAllListeners: function() { return dummyEth; },
+          emit: function() { return true; },
+          selectedAddress: null,
+          chainId: '0x1',
+          networkVersion: '1',
+          __guarded: true
+        };
+
+        try {
+          Object.defineProperty(window, 'ethereum', {
+            configurable: true,
+            enumerable: true,
+            get: function() { return dummyEth; },
+            set: function() {}
+          });
+        } catch (e) {}
+
+        // Console Silencing
+        ['error', 'warn', 'log', 'info', 'debug'].forEach(function(method) {
+          var orig = console[method];
+          console[method] = function() {
+            for (var i = 0; i < arguments.length; i++) {
+              if (isNoise(arguments[i])) return;
+            }
+            if (orig) orig.apply(console, arguments);
+          };
+        });
+
+        // Global Error Handlers
+        var prevOnError = window.onerror;
+        window.onerror = function(msg, url, line, col, err) {
+          if (isNoise(msg) || isNoise(url) || isNoise(err)) {
+            return true;
+          }
+          if (typeof prevOnError === 'function') {
+            return prevOnError.apply(this, arguments);
+          }
+        };
+
+        var prevOnRejection = window.onunhandledrejection;
+        window.onunhandledrejection = function(e) {
+          if (isNoise(e ? (e.reason || e) : null)) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
+            return true;
+          }
+          if (typeof prevOnRejection === 'function') {
+            return prevOnRejection.apply(this, arguments);
+          }
+        };
+
+        window.addEventListener('error', function(e) {
+          if (isNoise(e.message) || isNoise(e.error) || isNoise(e.filename) || isNoise(e.target)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isNoise(e.reason) || isNoise(e)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('message', function(e) {
+          if (isNoise(e.data)) {
+            e.stopImmediatePropagation();
+          }
+        }, true);
+
+        var origDispatch = window.dispatchEvent;
+        window.dispatchEvent = function(event) {
+          if (event && (isNoise(event.type) || isNoise(event.detail) || isNoise(event.data))) {
+            return true;
+          }
+          return origDispatch.apply(window, arguments);
+        };
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="icon" type="image/png" href="https://hectvnfwjxkexfoxcohj.supabase.co/storage/v1/object/public/media-files/quick_logo.png" />
     <title>Quick Receipt - Create Invoices &amp; Receipts in 10 Seconds</title>

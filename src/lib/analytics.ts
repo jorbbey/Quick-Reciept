@@ -3,52 +3,146 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://hectvnfwjxkexfoxcohj.supabase.co';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_x93iBnOVSYwU16cLlGcgag_J7Yg4H0w';
 
-// Fail gracefully if env vars are missing
-export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY) 
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+export const isSupabaseConfigured = Boolean(
+  SUPABASE_URL && 
+  SUPABASE_ANON_KEY && 
+  SUPABASE_URL.startsWith('http')
+);
+
+// Fail gracefully if env vars are missing or invalid
+export const supabase = isSupabaseConfigured 
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
   : null;
+
+/**
+ * Safely get the active user session without throwing unhandled network errors
+ */
+export const getSafeSession = async () => {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return null;
+    return data?.session || null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Authentication
  */
+export const signUpWithPassword = async (email: string, password: string) => {
+  if (!supabase) return { data: null, error: { message: 'Cloud service is not configured' } };
+  try {
+    const res = await supabase.auth.signUp({
+      email,
+      password
+    });
+    if (res.error) {
+      return { data: null, error: { message: res.error.message } };
+    }
+    return res;
+  } catch (err: any) {
+    return { data: null, error: { message: err?.message || 'Network error during sign up. Please try again.' } };
+  }
+};
+
+export const signInWithPassword = async (email: string, password: string) => {
+  if (!supabase) return { data: null, error: { message: 'Cloud service is not configured' } };
+  try {
+    const res = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+    if (res.error) {
+      return { data: null, error: { message: res.error.message } };
+    }
+    return res;
+  } catch (err: any) {
+    return { data: null, error: { message: err?.message || 'Network error during sign in. Please try again.' } };
+  }
+};
+
+export const resetPassword = async (email: string) => {
+  if (!supabase) return { data: null, error: { message: 'Cloud service is not configured' } };
+  try {
+    return await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined
+    });
+  } catch (err: any) {
+    return { data: null, error: { message: err?.message || 'Failed to send password reset email.' } };
+  }
+};
+
+export const updatePassword = async (password: string) => {
+  if (!supabase) return { data: null, error: { message: 'Cloud service is not configured' } };
+  try {
+    return await supabase.auth.updateUser({ password });
+  } catch (err: any) {
+    return { data: null, error: { message: err?.message || 'Failed to update password.' } };
+  }
+};
+
 export const signInWithEmail = async (email: string) => {
-  if (!supabase) return { error: { message: 'Supabase not configured' } };
-  return await supabase.auth.signInWithOtp({ email });
+  if (!supabase) return { error: { message: 'Cloud service is not configured' } };
+  try {
+    return await supabase.auth.signInWithOtp({ email });
+  } catch (err: any) {
+    return { error: { message: err?.message || 'Failed to send code.' } };
+  }
 };
 
 export const verifyOTP = async (email: string, token: string) => {
-  if (!supabase) return { error: { message: 'Supabase not configured' } };
+  if (!supabase) return { error: { message: 'Cloud service is not configured' } };
   
-  // Try 'email' first (standard for OTP)
-  const response = await supabase.auth.verifyOtp({ email, token, type: 'email' });
-  
-  // If it fails with "Token has expired or is invalid", it might be because 
-  // the user is new and 'signup' type is required instead.
-  if (response.error && (response.error.message.includes('expired') || response.error.message.includes('invalid'))) {
-    const signupResponse = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
-    if (!signupResponse.error) return signupResponse;
+  try {
+    // Try 'email' first (standard for OTP)
+    const response = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+    
+    // If it fails with "Token has expired or is invalid", it might be because 
+    // the user is new and 'signup' type is required instead.
+    if (response.error && (response.error.message.includes('expired') || response.error.message.includes('invalid'))) {
+      const signupResponse = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
+      if (!signupResponse.error) return signupResponse;
+    }
+    
+    return response;
+  } catch (err: any) {
+    return { error: { message: err?.message || 'Verification failed.' } };
   }
-  
-  return response;
 };
 
 export const signOut = async () => {
   if (!supabase) return;
-  return await supabase.auth.signOut();
+  try {
+    return await supabase.auth.signOut();
+  } catch {
+    // Silently ignore network failures on sign out
+  }
 };
 
 /**
  * Gets or generates an anonymous device ID
  */
 const getDeviceId = () => {
-  let deviceId = localStorage.getItem('qr_device_id');
-  if (!deviceId) {
-    deviceId = typeof crypto.randomUUID === 'function' 
-      ? crypto.randomUUID() 
-      : `anon_${Math.random().toString(36).substring(2, 15)}`;
-    localStorage.setItem('qr_device_id', deviceId);
+  try {
+    let deviceId = localStorage.getItem('qr_device_id');
+    if (!deviceId) {
+      deviceId = typeof crypto.randomUUID === 'function' 
+        ? crypto.randomUUID() 
+        : `anon_${Math.random().toString(36).substring(2, 15)}`;
+      localStorage.setItem('qr_device_id', deviceId);
+    }
+    return deviceId;
+  } catch {
+    return 'fallback_device';
   }
-  return deviceId;
 };
 
 export const initAnalytics = () => {
@@ -58,15 +152,14 @@ export const initAnalytics = () => {
 /**
  * Tracks an event to Supabase events table
  * Supports both anonymous (device_id only) and authenticated (device_id + user_id)
+ * Safe and non-blocking — never throws unhandled errors if offline or network fails
  */
 export const trackEvent = async (eventName: string, metadata: Record<string, any> = {}) => {
   if (!supabase) return;
 
   try {
     const deviceId = getDeviceId();
-    
-    // Attempt to get the current user session
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSafeSession();
     const userId = session?.user?.id || null;
 
     // Construct the event payload according to required schema
@@ -77,20 +170,13 @@ export const trackEvent = async (eventName: string, metadata: Record<string, any
       metadata: metadata || {}
     };
 
-    // Insert into Supabase - fire and forget to avoid blocking UI
-    supabase
+    // Insert into Supabase - fire and forget to avoid blocking UI with safe error suppression
+    await supabase
       .from('events')
-      .insert(payload)
-      .then(({ error }) => {
-        if (error && import.meta.env.DEV) {
-          console.error(`[Analytics Error] Failed to track ${eventName}:`, error.message);
-        }
-      });
+      .insert(payload);
 
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.error('[Analytics Error] Unexpected error in trackEvent:', error);
-    }
+  } catch {
+    // Silently swallow analytics error to never disrupt user flow
   }
 };
 
@@ -100,47 +186,50 @@ export const trackEvent = async (eventName: string, metadata: Record<string, any
  */
 export const syncProfile = async (email: string, businessData?: string | any) => {
   if (!supabase) return;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return;
-
-  const name = typeof businessData === 'string' ? businessData : businessData?.name;
-  const payload: any = {
-    id: session.user.id,
-    email: email,
-    business_name: name || null,
-    updated_at: new Date().toISOString()
-  };
-
-  if (typeof businessData === 'object' && businessData !== null) {
-    payload.business_info = businessData;
-  }
-
   try {
+    const session = await getSafeSession();
+    if (!session?.user) return;
+
+    const name = typeof businessData === 'string' ? businessData : businessData?.name;
+    const payload: any = {
+      id: session.user.id,
+      email: email,
+      business_name: name || null,
+      updated_at: new Date().toISOString()
+    };
+
+    if (typeof businessData === 'object' && businessData !== null) {
+      payload.business_info = businessData;
+    }
+
     const { error } = await supabase.from('profiles').upsert(payload);
     if (error && (error.message?.includes('business_info') || error.code === 'PGRST204')) {
       delete payload.business_info;
       await supabase.from('profiles').upsert(payload);
     }
-  } catch (err) {
-    console.error('syncProfile error:', err);
+  } catch {
+    // Quietly ignore sync issues
   }
 };
 
 export const fetchProfile = async () => {
   if (!supabase) return null;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return null;
+  try {
+    const session = await getSafeSession();
+    if (!session?.user) return null;
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .single();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .single();
 
-  if (error) {
-    console.error('Error fetching profile:', error);
+    if (error) {
+      return null;
+    }
+    return data;
+  } catch {
     return null;
   }
-  return data;
 };
 
 /**
@@ -149,10 +238,10 @@ export const fetchProfile = async () => {
 export const saveReceiptToCloud = async (receipt: any, business: any) => {
   if (!supabase) return { error: { message: 'Supabase not configured' } };
   
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return { error: { message: 'Not authenticated' } };
-
   try {
+    const session = await getSafeSession();
+    if (!session?.user) return { error: { message: 'Not authenticated' } };
+
     const { data, error } = await supabase.from('receipts').upsert({
       id: receipt.id,
       user_id: session.user.id,
@@ -168,50 +257,55 @@ export const saveReceiptToCloud = async (receipt: any, business: any) => {
     }).select();
 
     if (error) {
-      console.error('Supabase Save Error:', error);
       return { error };
     }
     return { data, error: null };
-  } catch (err) {
-    console.error('Unexpected save error:', err);
-    return { error: err };
+  } catch (err: any) {
+    return { error: { message: err?.message || 'Network error saving receipt' } };
   }
 };
 
 export const fetchReceiptsFromCloud = async () => {
   if (!supabase) return [];
   
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return [];
+  try {
+    const session = await getSafeSession();
+    if (!session?.user) return [];
 
-  const { data, error } = await supabase
-    .from('receipts')
-    .select('*')
-    .order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching receipts:', error);
+    if (error || !data) {
+      return [];
+    }
+
+    // Map database columns back to application object structure
+    return data.map(item => ({
+      id: item.id,
+      customerName: item.customer_name,
+      businessName: item.business_name,
+      items: item.items,
+      total: parseFloat(item.total_amount),
+      template: item.template_name,
+      signature: item.signature_url,
+      themeColor: item.theme_color,
+      createdAt: item.created_at,
+      _synced: true
+    }));
+  } catch {
     return [];
   }
-
-  // Map database columns back to application object structure
-  return data.map(item => ({
-    id: item.id,
-    customerName: item.customer_name,
-    businessName: item.business_name,
-    items: item.items,
-    total: parseFloat(item.total_amount),
-    template: item.template_name,
-    signature: item.signature_url,
-    themeColor: item.theme_color,
-    createdAt: item.created_at,
-    _synced: true
-  }));
 };
 
 export const deleteReceiptFromCloud = async (id: string) => {
   if (!supabase) return;
-  return await supabase.from('receipts').delete().match({ id });
+  try {
+    return await supabase.from('receipts').delete().match({ id });
+  } catch {
+    // Ignore deletion network errors
+  }
 };
 
 /**
@@ -220,10 +314,10 @@ export const deleteReceiptFromCloud = async (id: string) => {
 export const saveInvoiceToCloud = async (invoice: any, business: any) => {
   if (!supabase) return { error: { message: 'Supabase not configured' } };
   
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return { error: { message: 'Not authenticated' } };
-
   try {
+    const session = await getSafeSession();
+    if (!session?.user) return { error: { message: 'Not authenticated' } };
+
     const { data, error } = await supabase.from('invoices').upsert({
       id: invoice.id,
       user_id: session.user.id,
@@ -244,55 +338,60 @@ export const saveInvoiceToCloud = async (invoice: any, business: any) => {
     }).select();
 
     if (error) {
-      console.error('Supabase Invoice Save Error:', error);
       return { error };
     }
     return { data, error: null };
-  } catch (err) {
-    console.error('Unexpected invoice save error:', err);
-    return { error: err };
+  } catch (err: any) {
+    return { error: { message: err?.message || 'Network error saving invoice' } };
   }
 };
 
 export const fetchInvoicesFromCloud = async () => {
   if (!supabase) return [];
   
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return [];
+  try {
+    const session = await getSafeSession();
+    if (!session?.user) return [];
 
-  const { data, error } = await supabase
-    .from('invoices')
-    .select('*')
-    .order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching invoices:', error);
+    if (error || !data) {
+      return [];
+    }
+
+    return data.map(item => ({
+      id: item.id,
+      customerName: item.customer_name,
+      customerContact: item.customer_contact,
+      businessName: item.business_name,
+      invoiceNumber: item.invoice_number,
+      items: item.items,
+      subtotal: parseFloat(item.subtotal),
+      total: parseFloat(item.total_amount),
+      dueDate: item.due_date,
+      notes: item.notes,
+      template: item.template_name,
+      signature: item.signature_url,
+      themeColor: item.theme_color,
+      status: item.status,
+      createdAt: item.created_at,
+      _synced: true
+    }));
+  } catch {
     return [];
   }
-
-  return data.map(item => ({
-    id: item.id,
-    customerName: item.customer_name,
-    customerContact: item.customer_contact,
-    businessName: item.business_name,
-    invoiceNumber: item.invoice_number,
-    items: item.items,
-    subtotal: parseFloat(item.subtotal),
-    total: parseFloat(item.total_amount),
-    dueDate: item.due_date,
-    notes: item.notes,
-    template: item.template_name,
-    signature: item.signature_url,
-    themeColor: item.theme_color,
-    status: item.status,
-    createdAt: item.created_at,
-    _synced: true
-  }));
 };
 
 export const deleteInvoiceFromCloud = async (id: string) => {
   if (!supabase) return;
-  return await supabase.from('invoices').delete().match({ id });
+  try {
+    return await supabase.from('invoices').delete().match({ id });
+  } catch {
+    // Ignore deletion network errors
+  }
 };
 
 /**
@@ -307,14 +406,12 @@ export const fetchEvents = async () => {
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching events:', error);
+    if (error || !data) {
       return [];
     }
 
-    return data || [];
-  } catch (error) {
-    console.error('Fetch events failed:', error);
+    return data;
+  } catch {
     return [];
   }
 };

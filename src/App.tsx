@@ -38,6 +38,7 @@ import {
   trackEvent, 
   initAnalytics, 
   supabase, 
+  getSafeSession,
   signOut, 
   saveReceiptToCloud, 
   fetchReceiptsFromCloud, 
@@ -72,6 +73,8 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authReason, setAuthReason] = useState<'limit_reached' | 'manual'>('manual');
+  const [pendingDoc, setPendingDoc] = useState<{ type: 'receipt' | 'invoice'; data: Receipt | Invoice } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -178,8 +181,81 @@ export default function App() {
   };
 
   // Sync receipts, invoices, and business profile with cloud if logged in
+  const handleAuthSuccess = async (authenticatedUser?: SupabaseUser | null) => {
+    let currentUser = authenticatedUser || user;
+    if (!currentUser) {
+      const { data: { session } } = await supabase?.auth.getSession() || { data: { session: null } };
+      currentUser = session?.user || null;
+    }
+    if (currentUser) {
+      setUser(currentUser);
+    }
+
+    // 1. Sync Business Profile
+    if (currentUser && businessInfo) {
+      await syncProfile(currentUser.email || '', businessInfo);
+    }
+
+    // 2. Migrate existing local receipts to the newly authenticated account
+    if (currentUser) {
+      for (const r of receipts) {
+        if (!r._synced) {
+          await saveReceiptToCloud(r, businessInfo);
+        }
+      }
+      setReceipts(prev => prev.map(r => ({ ...r, _synced: true })));
+
+      // 3. Migrate existing local invoices
+      for (const i of invoices) {
+        if (!i._synced) {
+          await saveInvoiceToCloud(i, businessInfo);
+        }
+      }
+      setInvoices(prev => prev.map(i => ({ ...i, _synced: true })));
+    }
+
+    // 4. If there was a pending document waiting to be created upon hitting 5-document limit
+    if (pendingDoc) {
+      if (pendingDoc.type === 'receipt') {
+        const newReceipt = pendingDoc.data as Receipt;
+        setReceipts(prev => [newReceipt, ...prev.map(r => r.id === newReceipt.id ? { ...r, _synced: true } : r)]);
+        setCurrentReceipt(newReceipt);
+        setView('preview');
+        if (currentUser) {
+          await saveReceiptToCloud(newReceipt, businessInfo);
+        }
+        trackEvent('receipt_created', {
+          total_amount: newReceipt.total,
+          item_count: newReceipt.items.length,
+          is_paid: newReceipt.isPaid
+        });
+      } else {
+        const newInvoice = pendingDoc.data as Invoice;
+        setInvoices(prev => [newInvoice, ...prev.map(i => i.id === newInvoice.id ? { ...i, _synced: true } : i)]);
+        setCurrentInvoice(newInvoice);
+        setView('preview_invoice');
+        if (currentUser) {
+          await saveInvoiceToCloud(newInvoice, businessInfo);
+        }
+        trackEvent('invoice_created', {
+          total_amount: newInvoice.total,
+          item_count: newInvoice.items.length,
+          due_date: newInvoice.dueDate
+        });
+      }
+      setPendingDoc(null);
+    } else if (currentReceipt && view === 'preview') {
+      await handleSaveToCloud(currentReceipt);
+    } else if (currentInvoice && view === 'preview_invoice') {
+      await handleSaveInvoiceToCloud(currentInvoice);
+    }
+
+    // 5. Sync history from cloud
+    await syncHistory();
+  };
+
   const syncHistory = async () => {
-    const { data: { session } } = await supabase?.auth.getSession() || { data: { session: null } };
+    const session = await getSafeSession();
     if (!session?.user) return;
     
     setIsLoadingHistory(true);
@@ -245,9 +321,9 @@ export default function App() {
         syncProfile(session.user.email || '', currentActiveBusiness);
       }
 
-      // If user has a saved business info, direct directly to dashboard homepage
+      // If user had no local business info but cloud profile loaded, transition to dashboard
       if (currentActiveBusiness && currentActiveBusiness.name) {
-        setView('dashboard');
+        setView(prev => (!businessInfo && prev === 'setup' ? 'dashboard' : prev));
       }
     } finally {
       setIsLoadingHistory(false);
@@ -390,6 +466,17 @@ export default function App() {
   };
 
   const handleCreateReceipt = (receipt: Receipt) => {
+    // 5-document limit check for anonymous users
+    if (!user) {
+      const totalDocs = receipts.length + invoices.length;
+      if (totalDocs >= 5) {
+        setPendingDoc({ type: 'receipt', data: receipt });
+        setAuthReason('limit_reached');
+        setIsAuthModalOpen(true);
+        return;
+      }
+    }
+
     setReceipts([receipt, ...receipts]);
     setCurrentReceipt(receipt);
     setView('preview');
@@ -406,10 +493,17 @@ export default function App() {
   };
 
   const handleCreateInvoice = (invoice: Invoice) => {
+    // 5-document limit check for anonymous users
     if (!user) {
-      setIsAuthModalOpen(true);
-      return;
+      const totalDocs = receipts.length + invoices.length;
+      if (totalDocs >= 5) {
+        setPendingDoc({ type: 'invoice', data: invoice });
+        setAuthReason('limit_reached');
+        setIsAuthModalOpen(true);
+        return;
+      }
     }
+
     setInvoices([invoice, ...invoices]);
     setCurrentInvoice(invoice);
     setView('preview_invoice');
@@ -420,7 +514,9 @@ export default function App() {
       due_date: invoice.dueDate
     });
 
-    handleSaveInvoiceToCloud(invoice);
+    if (user) {
+      handleSaveInvoiceToCloud(invoice);
+    }
   };
 
   const handleDeleteReceipt = async (id: string) => {
@@ -516,19 +612,27 @@ export default function App() {
     initAnalytics();
 
     // Auth Listener
-    supabase?.auth.getSession().then(({ data: { session } }) => {
+    getSafeSession().then((session) => {
       setUser(session?.user || null);
       if (session?.user) {
         syncHistory();
       }
     });
 
-    const { data: { subscription } } = supabase?.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      if (session?.user) {
-        syncHistory();
+    let subscription: { unsubscribe: () => void } | null = null;
+    if (supabase) {
+      try {
+        const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+          setUser(session?.user || null);
+          if (session?.user) {
+            syncHistory();
+          }
+        });
+        subscription = data?.subscription || null;
+      } catch {
+        // Safe fallback if auth subscription fails
       }
-    }) || { data: { subscription: null } };
+    }
     
     // Secret access to stats
     const params = new URLSearchParams(window.location.search);
@@ -538,15 +642,17 @@ export default function App() {
     } else if (localStorage.getItem('qr_admin_access') === 'true') {
       setIsAdmin(true);
     }
+
+    return () => {
+      subscription?.unsubscribe?.();
+    };
   }, []);
 
   React.useEffect(() => {
     if (!businessInfo && view !== 'setup') {
       setView('setup');
-    } else if (businessInfo?.name && view === 'setup' && (user || receipts.length > 0 || invoices.length > 0)) {
-      setView('dashboard');
     }
-  }, [businessInfo, view, user]);
+  }, [businessInfo]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 pb-10">
@@ -578,9 +684,14 @@ export default function App() {
           <div className="flex items-center gap-1 md:gap-2 border-l border-slate-200 pl-2 md:pl-4 ml-1 md:ml-2">
             <button 
               onClick={() => setView('setup')}
-              className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"
+              className={cn(
+                "p-1.5 md:p-2 rounded-full transition-colors flex items-center justify-center",
+                view === 'setup' ? "bg-blue-50 text-blue-600 ring-2 ring-blue-600/20" : "hover:bg-slate-100 text-slate-600"
+              )}
+              title="Settings & Business Profile"
+              aria-label="Settings"
             >
-              <Settings size={18} className="text-slate-600" />
+              <Settings size={18} />
             </button>
 
             {user ? (
@@ -624,7 +735,14 @@ export default function App() {
                 onCancel={() => businessInfo && setView('dashboard')}
                 receipts={receipts}
                 user={user}
-                onOpenAuth={() => setIsAuthModalOpen(true)}
+                onOpenAuth={() => {
+                  setAuthReason('manual');
+                  setIsAuthModalOpen(true);
+                }}
+                onSignOut={async () => {
+                  await signOut();
+                  setUser(null);
+                }}
               />
             </motion.div>
           )}
@@ -647,7 +765,63 @@ export default function App() {
                   </h2>
                   <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">{businessInfo?.name || 'Create records in seconds'}</p>
                 </div>
+                <button
+                  onClick={() => setView('setup')}
+                  className="mt-1 inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 rounded-full text-[10px] font-bold text-slate-600 transition-colors active:scale-95"
+                >
+                  <Settings size={12} />
+                  <span>Edit Business Profile</span>
+                </button>
               </div>
+
+              {/* Free Usage Tracker Banner for Anonymous Users */}
+              {!user && (
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-11 h-11 rounded-xl flex flex-col items-center justify-center font-black text-xs shrink-0",
+                      (receipts.length + invoices.length) >= 5 ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-600"
+                    )}>
+                      <span>{receipts.length + invoices.length}/5</span>
+                      <span className="text-[7px] uppercase tracking-tighter font-bold">Docs</span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-tight text-slate-800 flex items-center gap-2">
+                        <span>Free Anonymous Plan</span>
+                        {(receipts.length + invoices.length) >= 5 ? (
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[8px] font-black uppercase">
+                            5 Document Limit Reached
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-blue-600 lowercase">
+                            ({5 - (receipts.length + invoices.length)} left before free account)
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        {(receipts.length + invoices.length) >= 5 
+                          ? "Create a free account to keep all documents saved and enjoy unlimited receipts & invoices."
+                          : "Try Quick Receipt freely. Create an account anytime to enable cloud backup & sync."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setAuthReason((receipts.length + invoices.length) >= 5 ? 'limit_reached' : 'manual');
+                      setIsAuthModalOpen(true);
+                    }}
+                    className={cn(
+                      "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 shadow-sm whitespace-nowrap",
+                      (receipts.length + invoices.length) >= 5 
+                        ? "bg-amber-600 hover:bg-amber-700 text-white" 
+                        : "bg-slate-900 hover:bg-black text-white"
+                    )}
+                  >
+                    {(receipts.length + invoices.length) >= 5 ? 'Create Free Account' : 'Sign Up / Log In'}
+                  </button>
+                </div>
+              )}
 
               {/* Actions */}
               <div className="grid grid-cols-2 gap-4">
@@ -662,10 +836,7 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={() => {
-                    if (!user) setIsAuthModalOpen(true);
-                    else setView('create_invoice');
-                  }}
+                  onClick={() => setView('create_invoice')}
                   className={cn(
                     "p-4 h-32 rounded-3xl font-bold flex flex-col items-center justify-center gap-3 transition-all active:scale-95 border-2",
                     "bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50"
@@ -734,12 +905,12 @@ export default function App() {
                        {activeTab === 'receipts' ? <Plus className="text-slate-300" /> : <FileText className="text-slate-300" />}
                        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">No {activeTab} yet</p>
                     </div>
-                    {activeTab === 'invoices' && !user && (
+                    {activeTab === 'invoices' && (
                       <button 
-                        onClick={() => setIsAuthModalOpen(true)}
+                        onClick={() => setView('create_invoice')}
                         className="text-[9px] font-black uppercase text-blue-500 hover:underline"
                       >
-                        Login to create invoices
+                        + Create an Invoice
                       </button>
                     )}
                   </div>
@@ -960,10 +1131,7 @@ export default function App() {
                     </div>
                   </button>
                   <button
-                    onClick={() => {
-                      if (!user) setIsAuthModalOpen(true);
-                      else setView('create_invoice');
-                    }}
+                    onClick={() => setView('create_invoice')}
                     className={cn(
                       "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                       view === 'create_invoice' ? "bg-white shadow-md text-blue-600" : "text-slate-400 hover:text-slate-600"
@@ -1292,14 +1460,13 @@ export default function App() {
       {/* Auth Modal */}
       <AuthModal 
         isOpen={isAuthModalOpen} 
-        onClose={() => setIsAuthModalOpen(false)}
-        businessName={businessInfo?.name}
-        onSuccess={() => {
-          if (currentReceipt && view === 'preview') {
-            handleSaveToCloud(currentReceipt);
-          }
-          syncHistory();
+        onClose={() => {
+          setIsAuthModalOpen(false);
+          setPendingDoc(null);
         }}
+        businessName={businessInfo?.name}
+        reason={authReason}
+        onSuccess={handleAuthSuccess}
       />
     </div>
   );
