@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, User, Phone, Calendar, FileText, CreditCard, Mail, ShieldAlert, Landmark, Check, Users, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { Plus, Trash2, User, Phone, Calendar, FileText, CreditCard, Mail, ShieldAlert, Landmark, Check, Users, ChevronDown, ChevronUp, Sparkles, AlertCircle } from 'lucide-react';
 import { Invoice, InvoiceItem, Customer, BusinessInfo } from '../types';
 import { generateId } from '../lib/utils';
 import { getRecentCustomers, searchCustomers, saveCustomer } from '../lib/customers';
@@ -14,6 +14,8 @@ interface InvoiceFormProps {
   currency?: string;
 }
 
+const DRAFT_KEY = 'qr_invoice_draft';
+
 export default function InvoiceForm({
   onSubmit,
   onChange,
@@ -22,38 +24,55 @@ export default function InvoiceForm({
   businessInfo,
   currency = '₦'
 }: InvoiceFormProps) {
-  const [customerName, setCustomerName] = useState(initialData?.customerName || '');
-  const [customerContact, setCustomerContact] = useState(initialData?.customerContact || '');
+  const getInitialDraft = () => {
+    if (initialData) return null;
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const draft = getInitialDraft();
+
+  const [customerName, setCustomerName] = useState(initialData?.customerName ?? draft?.customerName ?? '');
+  const [customerContact, setCustomerContact] = useState(initialData?.customerContact ?? draft?.customerContact ?? '');
   const [invoiceNumber, setInvoiceNumber] = useState(
-    initialData?.invoiceNumber || `INV-${Math.random().toString(36).substring(2, 7).toUpperCase()}`
+    initialData?.invoiceNumber || draft?.invoiceNumber || `INV-${Math.random().toString(36).substring(2, 7).toUpperCase()}`
   );
   const [items, setItems] = useState<InvoiceItem[]>(
-    initialData?.items?.length ? initialData.items : [{ id: generateId(), name: '', price: 0, quantity: 1 }]
+    initialData?.items?.length
+      ? initialData.items
+      : draft?.items?.length
+      ? draft.items
+      : [{ id: generateId(), name: '', price: 0, quantity: 1 }]
   );
   const [dueDate, setDueDate] = useState(
-    initialData?.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    initialData?.dueDate || draft?.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
-  const [notes, setNotes] = useState(initialData?.notes || '');
-  const [status, setStatus] = useState<Invoice['status']>(initialData?.status || 'pending');
+  const [notes, setNotes] = useState(initialData?.notes ?? draft?.notes ?? '');
+  const [status, setStatus] = useState<Invoice['status']>(initialData?.status ?? draft?.status ?? 'pending');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Template-specific field states (prefilled with business defaults if present)
   const [paymentInfo, setPaymentInfo] = useState(
-    initialData?.paymentInfo || businessInfo?.paymentInfo || ''
+    initialData?.paymentInfo || draft?.paymentInfo || businessInfo?.paymentInfo || ''
   );
-  const [questionsEmail, setQuestionsEmail] = useState(initialData?.questionsEmail || '');
+  const [questionsEmail, setQuestionsEmail] = useState(initialData?.questionsEmail || draft?.questionsEmail || '');
   const [termsConditions, setTermsConditions] = useState(
-    initialData?.termsConditions || businessInfo?.termsConditions || ''
+    initialData?.termsConditions || draft?.termsConditions || businessInfo?.termsConditions || ''
   );
   const [accountName, setAccountName] = useState(
-    initialData?.accountName || businessInfo?.accountName || businessInfo?.name || ''
+    initialData?.accountName || draft?.accountName || businessInfo?.accountName || businessInfo?.name || ''
   );
   const [accountNumber, setAccountNumber] = useState(
-    initialData?.accountNumber || businessInfo?.accountNumber || ''
+    initialData?.accountNumber || draft?.accountNumber || businessInfo?.accountNumber || ''
   );
   const [bankName, setBankName] = useState(
-    initialData?.bankName || businessInfo?.bankName || ''
+    initialData?.bankName || draft?.bankName || businessInfo?.bankName || ''
   );
-  const [paymentMethod, setPaymentMethod] = useState(initialData?.paymentMethod || '');
+  const [paymentMethod, setPaymentMethod] = useState(initialData?.paymentMethod || draft?.paymentMethod || '');
 
   // Advanced options toggle
   const hasAdvancedContent = Boolean(
@@ -89,6 +108,49 @@ export default function InvoiceForm({
       if (initialData.paymentMethod !== undefined) setPaymentMethod(initialData.paymentMethod);
     }
   }, [initialData]);
+
+  // Auto-save draft
+  useEffect(() => {
+    if (!initialData) {
+      try {
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({
+            customerName,
+            customerContact,
+            invoiceNumber,
+            items,
+            dueDate,
+            notes,
+            status,
+            paymentInfo,
+            questionsEmail,
+            termsConditions,
+            accountName,
+            accountNumber,
+            bankName,
+            paymentMethod
+          })
+        );
+      } catch {}
+    }
+  }, [
+    customerName,
+    customerContact,
+    invoiceNumber,
+    items,
+    dueDate,
+    notes,
+    status,
+    paymentInfo,
+    questionsEmail,
+    termsConditions,
+    accountName,
+    accountNumber,
+    bankName,
+    paymentMethod,
+    initialData
+  ]);
 
   const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const total = subtotal;
@@ -137,6 +199,7 @@ export default function InvoiceForm({
 
   const handleCustomerNameChange = (val: string) => {
     setCustomerName(val);
+    setErrorMessage(null);
     if (val.trim()) {
       setFilteredCustomers(searchCustomers(val));
       setShowSuggestions(true);
@@ -149,6 +212,7 @@ export default function InvoiceForm({
     setCustomerName(c.name);
     if (c.phone) setCustomerContact(c.phone);
     setShowSuggestions(false);
+    setErrorMessage(null);
   };
 
   const addItem = () => {
@@ -156,6 +220,7 @@ export default function InvoiceForm({
   };
 
   const updateItem = (id: string, field: keyof InvoiceItem, value: string | number) => {
+    setErrorMessage(null);
     setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
@@ -167,14 +232,26 @@ export default function InvoiceForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName) return alert('Please enter customer name');
-    if (items.some(i => !i.name || i.price <= 0)) return alert('Please complete all item details');
+    if (!customerName || !customerName.trim()) {
+      setErrorMessage('Please enter a customer name.');
+      return;
+    }
+    if (items.some(i => !i.name || !i.name.trim() || i.price <= 0)) {
+      setErrorMessage('Please complete all item descriptions and enter prices greater than zero.');
+      return;
+    }
 
+    setErrorMessage(null);
     saveCustomer(customerName, customerContact);
+
+    // Clear draft on successful submit
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
 
     const invoice: Invoice = {
       id: generateId(),
-      customerName,
+      customerName: customerName.trim(),
       customerContact,
       invoiceNumber,
       items,
@@ -199,7 +276,7 @@ export default function InvoiceForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Customer & Invoice Info */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4 relative">
+      <div className="bg-white p-5 rounded-xl border border-slate-200 space-y-4 relative">
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Invoice Details</h2>
           <span className="text-[10px] px-2 py-1 bg-blue-50 text-blue-500 rounded font-mono font-bold tracking-widest">{invoiceNumber}</span>
@@ -255,7 +332,7 @@ export default function InvoiceForm({
 
             {/* Autocomplete Dropdown */}
             {showSuggestions && filteredCustomers.length > 0 && (
-              <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden max-h-48 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-white border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
                 {filteredCustomers.map((c) => (
                   <div
                     key={c.id}
@@ -324,7 +401,7 @@ export default function InvoiceForm({
       </div>
 
       {/* Items Section */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm pb-8">
+      <div className="bg-white p-5 rounded-xl border border-slate-200 pb-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Items & Rates</h2>
         </div>
@@ -400,7 +477,7 @@ export default function InvoiceForm({
       </div>
 
       {/* Advanced Options Toggle */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <button
           type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
@@ -594,7 +671,7 @@ export default function InvoiceForm({
       </div>
 
       {/* Totals Section */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</span>
@@ -604,7 +681,7 @@ export default function InvoiceForm({
                   key={s}
                   type="button"
                   onClick={() => setStatus(s)}
-                  className={`px-4 py-1.5 text-[9px] font-black uppercase rounded transition-all ${status === s ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}
+                  className={`px-4 py-1.5 text-[9px] font-black uppercase rounded transition-all ${status === s ? 'bg-white text-blue-600 font-bold border border-slate-200' : 'text-slate-400'}`}
                   style={status === s ? { color: 'var(--theme-primary, #2563eb)' } : {}}
                 >
                   {s}
@@ -620,10 +697,18 @@ export default function InvoiceForm({
         </div>
       </div>
 
+      {/* In-form Validation Error Banner */}
+      {errorMessage && (
+        <div className="flex items-center gap-2 p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-bold animate-in fade-in duration-200">
+          <AlertCircle size={16} className="shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
       <div className="flex gap-4 pt-2">
         <button
           type="submit"
-          className="flex-1 bg-blue-600 text-white hover:bg-blue-700 py-4 rounded-xl font-bold text-lg transition-all active:scale-95 shadow-xl shadow-blue-500/20"
+          className="flex-1 bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] py-4 rounded-xl font-bold text-base md:text-lg transition-all min-h-[52px] flex items-center justify-center"
           style={{ backgroundColor: 'var(--theme-primary, #2563eb)' }}
         >
           Generate Invoice

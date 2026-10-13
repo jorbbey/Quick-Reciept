@@ -158,7 +158,7 @@ export default function AnalyticsDashboard({ onBack }: AnalyticsDashboardProps) 
       {/* Main Grid for Visuals */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Activity Chart */}
-        <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200">
           <div className="flex items-center justify-between mb-8">
             <div>
               <h3 className="font-bold text-slate-800 uppercase text-xs tracking-widest mb-1">Growth & Stability</h3>
@@ -186,7 +186,6 @@ export default function AnalyticsDashboard({ onBack }: AnalyticsDashboardProps) 
                   contentStyle={{ 
                     borderRadius: '16px', 
                     border: 'none', 
-                    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)',
                     padding: '16px'
                   }}
                   labelStyle={{ fontWeight: '800', marginBottom: '6px', fontSize: '11px', color: '#64748b' }}
@@ -206,7 +205,7 @@ export default function AnalyticsDashboard({ onBack }: AnalyticsDashboardProps) 
         </div>
 
         {/* User Ranking Sidebar-like Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden flex flex-col">
           <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div>
               <h3 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest mb-1">Top Performers</h3>
@@ -249,7 +248,7 @@ export default function AnalyticsDashboard({ onBack }: AnalyticsDashboardProps) 
       </div>
 
       {/* Detailed User Breakdown Section */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div>
             <h3 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest mb-1">User Engagement Detail</h3>
@@ -304,7 +303,7 @@ export default function AnalyticsDashboard({ onBack }: AnalyticsDashboardProps) 
       </div>
 
       {/* Details Table (Recent Stream) */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <h3 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Real-time Event Stream</h3>
           <div className="flex items-center gap-4">
@@ -352,7 +351,7 @@ export default function AnalyticsDashboard({ onBack }: AnalyticsDashboardProps) 
 
 function StatCard({ icon, label, value, subLabel }: any) {
   return (
-    <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm space-y-6 transition-all hover:shadow-lg hover:border-blue-200 group">
+    <div className="bg-white p-8 rounded-[2rem] border border-slate-200 space-y-6 transition-all hover:border-slate-300 group">
       <div className="p-4 w-fit bg-slate-50 rounded-2xl group-hover:bg-blue-50 transition-colors">
         {icon}
       </div>

@@ -144,7 +144,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
   };
 
   return (
-    <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm">
+    <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200">
       <div className="mb-8">
         <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-2">Business Profile</h2>
         <p className="text-slate-800 font-bold text-xl">General & Default Settings</p>
@@ -153,7 +153,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
       {!user && onOpenAuth && (
         <div className="mb-6 p-4 bg-blue-50/80 border border-blue-100 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-sm">
+            <div className="p-2.5 bg-blue-600 text-white rounded-xl">
               <Database size={20} />
             </div>
             <div>
@@ -164,7 +164,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
           <button
             type="button"
             onClick={onOpenAuth}
-            className="px-4 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 shadow-sm"
+            className="px-4 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95"
           >
             Sign In / Log In
           </button>
@@ -193,7 +193,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
               <button
                 type="button"
                 onClick={() => setShowPasswordChange(!showPasswordChange)}
-                className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
               >
                 <KeyRound size={14} />
                 <span>{showPasswordChange ? 'Cancel' : 'Change Password'}</span>
@@ -203,7 +203,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
                 <button
                   type="button"
                   onClick={onSignOut}
-                  className="px-3.5 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                  className="px-3.5 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
                 >
                   <LogOut size={14} />
                   <span>Sign Out</span>
@@ -264,7 +264,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
               <button
                 type="submit"
                 disabled={passwordLoading}
-                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 disabled:opacity-50"
               >
                 {passwordLoading ? (
                   <Loader2 className="animate-spin" size={14} />
@@ -283,7 +283,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
         <div className="flex items-center gap-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
           <div className="relative group shrink-0">
             {logo ? (
-              <img src={logo} alt="Logo" className="w-20 h-20 rounded-xl object-cover border border-slate-200 shadow-sm" />
+              <img src={logo} alt="Logo" className="w-20 h-20 rounded-xl object-cover border border-slate-200" />
             ) : (
               <div className="w-20 h-20 bg-white border border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 group-hover:bg-slate-100 transition-colors">
                 <Camera size={20} />
@@ -454,7 +454,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
                 className={`w-10 h-10 rounded-full ${t.color} flex items-center justify-center transition-all ${themeColor === t.id ? 'ring-4 ring-slate-200 scale-110' : 'opacity-60 hover:opacity-100'}`}
               >
                 {themeColor === t.id && (
-                  <div className="w-2 h-2 bg-white rounded-full shadow-sm" />
+                  <div className="w-2 h-2 bg-white rounded-full" />
                 )}
               </button>
             ))}
@@ -517,7 +517,7 @@ export default function BusinessSetup({ initialData, onSave, onCancel, receipts,
           )}
           <button
             type="submit"
-            className="flex-1 px-6 py-2.5 rounded-lg font-bold text-sm bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/10"
+            className="flex-1 px-6 py-2.5 rounded-lg font-bold text-sm bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] transition-colors"
           >
             Save Profile
           </button>

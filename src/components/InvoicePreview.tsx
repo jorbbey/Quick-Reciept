@@ -31,8 +31,8 @@ const InvoicePreview = forwardRef<HTMLDivElement, InvoicePreviewProps>(({ invoic
       ref={ref} 
       className={cn(
         "bg-white w-full max-w-full mx-auto relative overflow-hidden flex flex-col transition-all duration-500",
-        isMinimal ? "p-4 md:p-6 lg:p-8 font-sans text-slate-600 shadow-sm" : 
-        isModern ? "p-0 font-sans text-slate-800 shadow-md" : 
+        isMinimal ? "p-4 md:p-6 lg:p-8 font-sans text-slate-600" : 
+        isModern ? "p-0 font-sans text-slate-800" : 
         "p-4 md:p-6 lg:p-8 font-sans text-slate-800"
       )}
       style={{ minHeight: '750px' }}

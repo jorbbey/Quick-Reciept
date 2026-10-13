@@ -32,8 +32,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { BusinessInfo, Receipt, ReceiptItem, Invoice, InvoiceItem } from './types';
 import { cn, formatCurrency, generateId, isValidUUID, generateWhatsAppMessage } from './lib/utils';
-import { toPng } from 'html-to-image';
-import { jsPDF } from 'jspdf';
+import { useMobileLifecycle } from './hooks/useMobileLifecycle';
+import { 
+  shareDocumentAttachment, 
+  downloadOrSaveFile, 
+  captureElementToPng, 
+  generateDocumentPdf, 
+  formatExportFilename, 
+  dataUrlToBlob, 
+  isNativeMobile 
+} from './lib/fileExport';
 import { 
   trackEvent, 
   initAnalytics, 
@@ -51,8 +59,19 @@ import {
 } from './lib/analytics';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
+// Entrance Screens
+import SplashScreen from './components/entrance/SplashScreen';
+import WelcomeScreen from './components/entrance/WelcomeScreen';
+import ChoiceScreen from './components/entrance/ChoiceScreen';
+import SignUpScreen from './components/entrance/SignUpScreen';
+import SignInScreen from './components/entrance/SignInScreen';
+
 // Components
 import BusinessSetup from './components/BusinessSetup';
+import ProfileView from './components/ProfileView';
+import SettingsView from './components/SettingsView';
+import TemplatesView from './components/TemplatesView';
+import BottomNav from './components/BottomNav';
 import ReceiptForm from './components/ReceiptForm';
 import ReceiptPreview from './components/ReceiptPreview';
 import InvoiceForm from './components/InvoiceForm';
@@ -64,7 +83,13 @@ export default function App() {
   const [businessInfo, setBusinessInfo] = useLocalStorage<BusinessInfo | null>('qr_business_info', null);
   const [receipts, setReceipts] = useLocalStorage<Receipt[]>('qr_receipts', []);
   const [invoices, setInvoices] = useLocalStorage<Invoice[]>('qr_invoices', []);
-  const [view, setView] = useState<'dashboard' | 'setup' | 'create' | 'preview' | 'create_invoice' | 'preview_invoice' | 'stats'>('dashboard');
+  const [hasCompletedEntrance, setHasCompletedEntrance] = useLocalStorage<boolean>('qr_entrance_completed', false);
+
+  // Entrance Screen Navigation: 'splash' | 'welcome' | 'choice' | 'signup' | 'signin' | 'main'
+  const [entranceScreen, setEntranceScreen] = useState<'splash' | 'welcome' | 'choice' | 'signup' | 'signin' | 'main'>('splash');
+  const [initError, setInitError] = useState<string | null>(null);
+
+  const [view, setView] = useState<'dashboard' | 'setup' | 'profile' | 'templates' | 'settings' | 'create' | 'preview' | 'create_invoice' | 'preview_invoice' | 'stats'>('dashboard');
   const [activeTab, setActiveTab] = useState<'receipts' | 'invoices'>('receipts');
   const [currentReceipt, setCurrentReceipt] = useState<Receipt | null>(null);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null);
@@ -76,6 +101,8 @@ export default function App() {
   const [authReason, setAuthReason] = useState<'limit_reached' | 'manual'>('manual');
   const [pendingDoc, setPendingDoc] = useState<{ type: 'receipt' | 'invoice'; data: Receipt | Invoice } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -411,12 +438,12 @@ export default function App() {
 
   const getThemeColorClass = () => {
     switch (businessInfo?.themeColor) {
-      case 'green': return 'blue-600 bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20';
-      case 'purple': return 'blue-600 bg-purple-600 hover:bg-purple-700 shadow-purple-500/20';
-      case 'orange': return 'blue-600 bg-orange-600 hover:bg-orange-700 shadow-orange-500/20';
-      case 'red': return 'blue-600 bg-red-600 hover:bg-red-700 shadow-red-500/20';
-      case 'dark': return 'blue-600 bg-slate-900 hover:bg-black shadow-slate-900/20';
-      default: return 'blue-600 bg-blue-600 hover:bg-blue-700 shadow-blue-500/20';
+      case 'green': return 'blue-600 bg-emerald-600 hover:bg-emerald-700';
+      case 'purple': return 'blue-600 bg-purple-600 hover:bg-purple-700';
+      case 'orange': return 'blue-600 bg-orange-600 hover:bg-orange-700';
+      case 'red': return 'blue-600 bg-red-600 hover:bg-red-700';
+      case 'dark': return 'blue-600 bg-slate-900 hover:bg-black';
+      default: return 'blue-600 bg-blue-600 hover:bg-blue-700';
     }
   };
 
@@ -463,6 +490,39 @@ export default function App() {
         theme: info.themeColor
       });
     }
+  };
+
+  const handleUpdateThemeColor = async (color: BusinessInfo['themeColor']) => {
+    if (!color) return;
+    const updated: BusinessInfo = {
+      name: businessInfo?.name || '',
+      phone: businessInfo?.phone || '',
+      address: businessInfo?.address || '',
+      currency: businessInfo?.currency || '₦',
+      ...(businessInfo || {}),
+      themeColor: color
+    };
+    setBusinessInfo(updated);
+    if (user) {
+      await syncProfile(user.email || '', updated);
+    }
+    trackEvent('theme_color_changed', { color });
+  };
+
+  const handleUpdateTemplate = async (type: 'receipt' | 'invoice', template: 'classic' | 'modern' | 'minimal') => {
+    const updated: BusinessInfo = {
+      name: businessInfo?.name || '',
+      phone: businessInfo?.phone || '',
+      address: businessInfo?.address || '',
+      currency: businessInfo?.currency || '₦',
+      ...(businessInfo || {}),
+      ...(type === 'receipt' ? { receiptTemplate: template, template } : { invoiceTemplate: template })
+    };
+    setBusinessInfo(updated);
+    if (user) {
+      await syncProfile(user.email || '', updated);
+    }
+    trackEvent('template_changed', { type, template });
   };
 
   const handleCreateReceipt = (receipt: Receipt) => {
@@ -543,88 +603,126 @@ export default function App() {
     return `${name}_${type}_${date}.${extension}`;
   };
 
-  const shareReceipt = async (type: 'receipt' | 'invoice' = 'receipt') => {
-    if (!exportRef.current) return;
-    
-    try {
-      const dataUrl = await toPng(exportRef.current, { backgroundColor: '#ffffff', pixelRatio: 2 });
-      const blob = await (await fetch(dataUrl)).blob();
-      const filename = getFilename('png', type);
-      const file = new File([blob], filename, { type: 'image/png' });
-      const item = type === 'receipt' ? currentReceipt : currentInvoice;
+  const handleShareDocument = async (format: 'png' | 'pdf', type: 'receipt' | 'invoice') => {
+    if (!exportRef.current || isExporting) return;
+    const item = type === 'receipt' ? currentReceipt : currentInvoice;
+    if (!item) return;
 
-      if (navigator.share) {
-        await navigator.share({
-          files: [file],
-          title: `${type === 'receipt' ? 'Receipt' : 'Invoice'} from ${businessInfo?.name}`,
-          text: `Here is your ${type} for ${formatCurrency(item?.total || 0)}`
-        });
-        trackEvent(`${type}_shared`, { channel: 'web_share_api' });
-      } else {
-        // Fallback for WhatsApp
-        const text = encodeURIComponent(`${type === 'receipt' ? 'Receipt' : 'Invoice'} from ${businessInfo?.name}\nTotal: ${formatCurrency(item?.total || 0)}\nView Link: ${window.location.href}`);
-        window.open(`https://wa.me/?text=${text}`, '_blank');
-        trackEvent(`${type}_shared`, { channel: 'whatsapp_link' });
+    setIsExporting(true);
+    setExportFeedback(`Preparing ${format.toUpperCase()}...`);
+    try {
+      const docItem = {
+        id: item.id,
+        customerName: item.customerName,
+        total: item.total,
+        type,
+        invoiceNumber: (item as Invoice).invoiceNumber
+      };
+
+      const result = await shareDocumentAttachment({
+        element: exportRef.current,
+        doc: docItem,
+        fileFormat: format,
+        customFilename,
+        businessName: businessInfo?.name,
+        currency: businessInfo?.currency || '₦'
+      });
+
+      if (result.success) {
+        trackEvent(`${type}_shared`, { format, method: result.method });
       }
     } catch (err) {
-      console.error('Error sharing:', err);
+      console.error('Share error:', err);
+    } finally {
+      setIsExporting(false);
+      setExportFeedback(null);
     }
   };
 
-  const downloadReceipt = async (type: 'png' | 'pdf', docType: 'receipt' | 'invoice' = 'receipt') => {
-    if (!exportRef.current) return;
-    
-    const dataUrl = await toPng(exportRef.current, { backgroundColor: '#ffffff', pixelRatio: 2 });
-    
-    if (type === 'png') {
-      const link = document.createElement('a');
-      link.download = getFilename('png', docType);
-      link.href = dataUrl;
-      link.click();
-      trackEvent(`${docType}_downloaded`, { type: 'png' });
-    } else {
-      // First, get original image metrics to calculate accurate proportional height
-      const tempPdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-      const imgProps = tempPdf.getImageProperties(dataUrl);
-      const pdfWidth = tempPdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      
-      // Re-create the PDF with exact proportional canvas format [width, height], 
-      // preventing any whitespace under short receipts or cropping under long invoices.
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: [pdfWidth, pdfHeight]
-      });
-      
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(getFilename('pdf', docType));
-      trackEvent(`${docType}_downloaded`, { type: 'pdf' });
-    }
-  };
+  const handleDownloadDocument = async (format: 'png' | 'pdf', docType: 'receipt' | 'invoice') => {
+    if (!exportRef.current || isExporting) return;
+    const item = docType === 'receipt' ? currentReceipt : currentInvoice;
+    if (!item) return;
 
-  // Auto-redirect to setup if no business info
-  useEffect(() => {
-    initAnalytics();
+    setIsExporting(true);
+    setExportFeedback(`Saving ${format.toUpperCase()}...`);
+    try {
+      const docItem = {
+        id: item.id,
+        customerName: item.customerName,
+        total: item.total,
+        type: docType,
+        invoiceNumber: (item as Invoice).invoiceNumber
+      };
+      const filename = formatExportFilename(docItem, format, customFilename);
 
-    // Auth Listener
-    getSafeSession().then((session) => {
-      setUser(session?.user || null);
-      if (session?.user) {
-        syncHistory();
+      if (format === 'png') {
+        const dataUrl = await captureElementToPng(exportRef.current);
+        const base64 = dataUrl.split(',')[1];
+        const blob = dataUrlToBlob(dataUrl);
+        await downloadOrSaveFile(blob, filename, base64);
+      } else {
+        const { dataUrl, base64 } = await generateDocumentPdf(exportRef.current, docType);
+        const blob = dataUrlToBlob(dataUrl);
+        await downloadOrSaveFile(blob, filename, base64);
       }
-    });
+
+      trackEvent(`${docType}_downloaded`, { type: format });
+    } catch (err) {
+      console.error('Download error:', err);
+    } finally {
+      setIsExporting(false);
+      setExportFeedback(null);
+    }
+  };
+
+  // App Initialization & Session check
+  const initializeApp = async () => {
+    setInitError(null);
+    try {
+      initAnalytics();
+
+      // Branded launch moment (load for up to 3 seconds before welcome screen)
+      const minDisplayPromise = new Promise((resolve) => setTimeout(resolve, 3000));
+      const sessionPromise = getSafeSession();
+
+      const [session] = await Promise.all([sessionPromise, minDisplayPromise]);
+      const currentUser = session?.user || null;
+      if (currentUser) {
+        setUser(currentUser);
+        // Returning authenticated user: complete entrance and sync history
+        setHasCompletedEntrance(true);
+        setEntranceScreen('main');
+        await syncHistory();
+      } else {
+        // No authenticated session. Check if returning anonymous user
+        const isReturningAnonymous = hasCompletedEntrance || Boolean(businessInfo?.name) || receipts.length > 0 || invoices.length > 0;
+        if (isReturningAnonymous) {
+          setHasCompletedEntrance(true);
+          setEntranceScreen('main');
+        } else {
+          // First time user: show Welcome screen
+          setEntranceScreen('welcome');
+        }
+      }
+    } catch (err: any) {
+      console.error('Initialization error:', err);
+      setInitError('Could not connect to session service. Tap to retry or continue offline.');
+    }
+  };
+
+  useEffect(() => {
+    initializeApp();
 
     let subscription: { unsubscribe: () => void } | null = null;
     if (supabase) {
       try {
         const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-          setUser(session?.user || null);
-          if (session?.user) {
+          const newUser = session?.user || null;
+          setUser(newUser);
+          if (newUser) {
+            setHasCompletedEntrance(true);
+            setEntranceScreen('main');
             syncHistory();
           }
         });
@@ -648,92 +746,248 @@ export default function App() {
     };
   }, []);
 
-  React.useEffect(() => {
-    if (!businessInfo && view !== 'setup') {
-      setView('setup');
+  const handleEntranceSuccess = async (authenticatedUser: SupabaseUser | null) => {
+    setHasCompletedEntrance(true);
+    setEntranceScreen('main');
+    if (authenticatedUser) {
+      setUser(authenticatedUser);
+      await handleAuthSuccess(authenticatedUser);
     }
-  }, [businessInfo]);
+  };
 
+  const handleContinueWithoutAccount = () => {
+    setHasCompletedEntrance(true);
+    setEntranceScreen('main');
+    if (!businessInfo) {
+      setView('profile');
+    } else {
+      setView('dashboard');
+    }
+    trackEvent('entrance_continued_anonymously');
+  };
+
+  const { isOnline } = useMobileLifecycle({
+    onHardwareBack: () => {
+      // 1. Entrance screen hardware back navigation
+      if (entranceScreen === 'signup' || entranceScreen === 'signin') {
+        setEntranceScreen('choice');
+        return true;
+      }
+      if (entranceScreen === 'choice') {
+        setEntranceScreen('welcome');
+        return true;
+      }
+      if (entranceScreen === 'welcome') {
+        // Allow app exit on first screen
+        return false;
+      }
+
+      // 2. Main app hardware back navigation
+      if (isAuthModalOpen) {
+        setIsAuthModalOpen(false);
+        setPendingDoc(null);
+        return true;
+      }
+      if (view !== 'dashboard') {
+        setView('dashboard');
+        return true;
+      }
+      return false;
+    },
+    onReconnect: () => {
+      if (user) {
+        syncHistory();
+      }
+    },
+    themeColorHex: businessInfo?.themeColor === 'green' ? '#10b981' :
+      businessInfo?.themeColor === 'purple' ? '#a855f7' :
+      businessInfo?.themeColor === 'orange' ? '#f97316' :
+      businessInfo?.themeColor === 'red' ? '#dc2626' :
+      businessInfo?.themeColor === 'dark' ? '#0f172a' : '#2563eb'
+  });
+
+  React.useEffect(() => {
+    if (entranceScreen === 'main' && !businessInfo && view !== 'profile') {
+      setView('profile');
+    }
+  }, [businessInfo, entranceScreen]);
+
+  // Screen A: Splash screen during initialization or retry
+  if (entranceScreen === 'splash') {
+    return (
+      <SplashScreen
+        errorMessage={initError}
+        onRetry={initializeApp}
+        onContinueOffline={handleContinueWithoutAccount}
+      />
+    );
+  }
+
+  // Screen B: Welcome screen for first-time onboarding
+  if (entranceScreen === 'welcome') {
+    return (
+      <WelcomeScreen
+        onGetStarted={() => setEntranceScreen('signup')}
+        onAlreadyHaveAccount={() => setEntranceScreen('signin')}
+      />
+    );
+  }
+
+  // Screen C: Choice screen (anonymous vs create account vs sign in)
+  if (entranceScreen === 'choice') {
+    const totalDocs = receipts.length + invoices.length;
+    const remaining = Math.max(0, 5 - totalDocs);
+    return (
+      <ChoiceScreen
+        remainingAnonymousDocs={remaining}
+        onContinueWithoutAccount={handleContinueWithoutAccount}
+        onCreateAccount={() => setEntranceScreen('signup')}
+        onSignIn={() => setEntranceScreen('signin')}
+        onBack={() => setEntranceScreen('welcome')}
+      />
+    );
+  }
+
+  // Screen D: Sign Up screen
+  if (entranceScreen === 'signup') {
+    return (
+      <SignUpScreen
+        businessName={businessInfo?.name}
+        onSuccess={handleEntranceSuccess}
+        onNavigateToSignIn={() => setEntranceScreen('signin')}
+        onBack={() => setEntranceScreen('welcome')}
+      />
+    );
+  }
+
+  // Screen E: Sign In screen
+  if (entranceScreen === 'signin') {
+    return (
+      <SignInScreen
+        onSuccess={handleEntranceSuccess}
+        onNavigateToSignUp={() => setEntranceScreen('signup')}
+        onBack={() => setEntranceScreen('welcome')}
+      />
+    );
+  }
+
+  // Screen F: Main application (Dashboard, Create, Previews, Setup, Insights)
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 pb-10">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 md:px-6 py-1 flex items-center justify-between safe-top">
-        <div className="flex items-center cursor-pointer shrink-0" onClick={() => setView('dashboard')}>
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 pb-28 safe-bottom">
+      {/* Offline Alert Banner */}
+      {!isOnline && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 text-center safe-top sticky top-0 z-40 border-b border-amber-600/30">
+          <CloudOff size={15} className="shrink-0" />
+          <span>Offline Mode: Records are securely saved to your device and will sync to cloud when reconnected.</span>
+        </div>
+      )}
+
+      {/* Top Mobile Bar (App Branding + Quick Status) */}
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-2.5 flex items-center justify-between safe-top">
+        <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => setView('dashboard')}>
           <img 
             src="https://hectvnfwjxkexfoxcohj.supabase.co/storage/v1/object/public/media-files/quick_logo.png" 
             alt="Quick Receipt Logo" 
-            className="h-14 w-auto md:h-16 object-contain -my-2" 
+            className="h-9 w-auto object-contain" 
           />
-        </div>
-        
-        <div className="flex items-center gap-2 md:gap-4">
-          <nav className="flex gap-4 md:gap-6 text-xs md:text-sm font-medium text-slate-500">
-            <button onClick={() => setView('create')} className={cn("hover:text-slate-800 transition-colors py-1 flex items-center gap-1.5", view === 'create' && cn(currentThemeText, "border-b-2", currentThemeText.replace('text-', 'border-')))}>
-              <Plus size={14} strokeWidth={3} className="sm:hidden" />
-              <span className="hidden sm:inline">Create</span>
-            </button>
-            <button onClick={() => setView('dashboard')} className={cn("hover:text-slate-800 transition-colors py-1 flex items-center gap-1.5", (view === 'dashboard' || view === 'history') && cn(currentThemeText, "border-b-2", currentThemeText.replace('text-', 'border-')))}>
-              <History size={14} strokeWidth={3} className="sm:hidden" />
-              <span className="hidden sm:inline">History</span>
-            </button>
-            {isAdmin && (
-              <button onClick={() => setView('stats')} className={cn("hover:text-slate-800 transition-colors py-1", view === 'stats' && cn(currentThemeText, "border-b-2", currentThemeText.replace('text-', 'border-')))}>Insights</button>
-            )}
-          </nav>
-
-          <div className="flex items-center gap-1 md:gap-2 border-l border-slate-200 pl-2 md:pl-4 ml-1 md:ml-2">
-            <button 
-              onClick={() => setView('setup')}
-              className={cn(
-                "p-1.5 md:p-2 rounded-full transition-colors flex items-center justify-center",
-                view === 'setup' ? "bg-blue-50 text-blue-600 ring-2 ring-blue-600/20" : "hover:bg-slate-100 text-slate-600"
-              )}
-              title="Settings & Business Profile"
-              aria-label="Settings"
-            >
-              <Settings size={18} />
-            </button>
-
-            {user ? (
-              <button 
-                onClick={() => signOut()}
-                className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 flex items-center gap-2"
-                title={`Logged in as ${user.email}`}
-              >
-                <LogOut size={18} />
-                <span className="hidden lg:inline text-[10px] font-black uppercase tracking-tighter max-w-[80px] truncate">{user.email?.split('@')[0]}</span>
-              </button>
-            ) : (
-              <button 
-                onClick={() => setIsAuthModalOpen(true)}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full text-[10px] font-black uppercase tracking-wider hover:bg-blue-100 transition-all active:scale-95"
-              >
-                <User size={12} strokeWidth={3} />
-                Login
-              </button>
-            )}
+          <div className="flex flex-col">
+            <span className="text-[13px] font-black tracking-tight flex items-center uppercase leading-none">
+              <span className="text-[#000033]">Quick</span>
+              <span className="text-blue-600 ml-0.5">Receipt</span>
+            </span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-tight mt-0.5">
+              {businessInfo?.name || 'Instant Invoicing'}
+            </span>
           </div>
         </div>
-      </header>
+        
+        <div className="flex items-center gap-2">
+          {user ? (
+            <button 
+              onClick={() => signOut()}
+              className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-red-600 flex items-center gap-1.5"
+              title={`Logged in as ${user.email} (Tap to logout)`}
+            >
+              <LogOut size={16} />
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-600 max-w-[90px] truncate hidden sm:inline">
+                {user.email?.split('@')[0]}
+              </span>
+            </button>
+          ) : (
+            <button 
+              onClick={() => setIsAuthModalOpen(true)}
+              className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-full text-[9px] font-black uppercase tracking-wider hover:bg-blue-100 transition-all active:scale-95 flex items-center gap-1"
+            >
+              <User size={11} strokeWidth={3} />
+              <span>Login</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       <main className={cn(
         "flex-1 p-3 md:p-6 mx-auto w-full transition-all duration-300",
         view === 'stats' ? "max-w-[1400px]" : (view === 'create_invoice' || view === 'preview_invoice') ? "max-w-7xl" : (view === 'create' || view === 'preview') ? "max-w-6xl" : "max-w-2xl"
       )}>
         <AnimatePresence mode="wait">
-          {view === 'setup' && (
+          {(view === 'setup' || view === 'profile') && (
             <motion.div
-              key="setup"
+              key="profile"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               className="px-1"
             >
-              <BusinessSetup 
+              <ProfileView 
                 initialData={businessInfo} 
                 onSave={handleSaveBusiness} 
-                onCancel={() => businessInfo && setView('dashboard')}
-                receipts={receipts}
+                onCancel={businessInfo ? () => setView('dashboard') : undefined}
+              />
+            </motion.div>
+          )}
+
+          {view === 'templates' && (
+            <motion.div
+              key="templates"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="px-1"
+            >
+              <TemplatesView
+                businessInfo={businessInfo}
+                onUpdateTemplate={handleUpdateTemplate}
+                onCreateReceipt={(template) => {
+                  if (template) {
+                    handleUpdateTemplate('receipt', template);
+                  }
+                  setReceiptInitialData(null);
+                  setCurrentReceipt(null);
+                  setView('create');
+                }}
+                onCreateInvoice={(template) => {
+                  if (template) {
+                    handleUpdateTemplate('invoice', template);
+                  }
+                  setInvoiceInitialData(null);
+                  setCurrentInvoice(null);
+                  setView('create_invoice');
+                }}
+              />
+            </motion.div>
+          )}
+
+          {view === 'settings' && (
+            <motion.div
+              key="settings"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="px-1"
+            >
+              <SettingsView
+                businessInfo={businessInfo}
+                onUpdateThemeColor={handleUpdateThemeColor}
                 user={user}
                 onOpenAuth={() => {
                   setAuthReason('manual');
@@ -743,6 +997,8 @@ export default function App() {
                   await signOut();
                   setUser(null);
                 }}
+                receipts={receipts}
+                invoices={invoices}
               />
             </motion.div>
           )}
@@ -756,7 +1012,7 @@ export default function App() {
               className="space-y-6"
             >
               {/* Business Summary */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center text-center gap-2">
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 flex flex-col items-center text-center gap-2">
                 <img src="https://hectvnfwjxkexfoxcohj.supabase.co/storage/v1/object/public/media-files/quick_logo.png" alt="Quick Receipt Logo" className="w-24 h-24 object-contain" />
                 <div className="-mt-10">
                   <h2 className="text-sm font-black tracking-tighter flex items-center justify-center uppercase">
@@ -766,7 +1022,7 @@ export default function App() {
                   <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">{businessInfo?.name || 'Create records in seconds'}</p>
                 </div>
                 <button
-                  onClick={() => setView('setup')}
+                  onClick={() => setView('profile')}
                   className="mt-1 inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 rounded-full text-[10px] font-bold text-slate-600 transition-colors active:scale-95"
                 >
                   <Settings size={12} />
@@ -776,7 +1032,7 @@ export default function App() {
 
               {/* Free Usage Tracker Banner for Anonymous Users */}
               {!user && (
-                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className={cn(
                       "w-11 h-11 rounded-xl flex flex-col items-center justify-center font-black text-xs shrink-0",
@@ -812,13 +1068,13 @@ export default function App() {
                       setIsAuthModalOpen(true);
                     }}
                     className={cn(
-                      "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 shadow-sm whitespace-nowrap",
+                      "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 whitespace-nowrap",
                       (receipts.length + invoices.length) >= 5 
                         ? "bg-amber-600 hover:bg-amber-700 text-white" 
                         : "bg-slate-900 hover:bg-black text-white"
                     )}
                   >
-                    {(receipts.length + invoices.length) >= 5 ? 'Create Free Account' : 'Sign Up / Log In'}
+                    {(receipts.length + invoices.length) >= 5 ? 'Create Account' : 'Sign Up / Log In'}
                   </button>
                 </div>
               )}
@@ -827,7 +1083,7 @@ export default function App() {
               <div className="grid grid-cols-2 gap-4">
                 <button
                   onClick={() => setView('create')}
-                  className={cn("text-white p-4 h-32 rounded-3xl font-bold flex flex-col items-center justify-center gap-3 transition-all active:scale-95 shadow-lg", getThemeColorClass())}
+                  className={cn("text-white p-4 h-32 rounded-3xl font-bold flex flex-col items-center justify-center gap-3 transition-all active:scale-95", getThemeColorClass())}
                 >
                   <div className="bg-white/20 p-3 rounded-2xl">
                     <Plus size={24} strokeWidth={3} />
@@ -855,7 +1111,7 @@ export default function App() {
                   onClick={() => setActiveTab('receipts')}
                   className={cn(
                     "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                    activeTab === 'receipts' ? "bg-white shadow-sm text-slate-900" : "text-slate-400 hover:text-slate-600"
+                    activeTab === 'receipts' ? "bg-white text-slate-900" : "text-slate-400 hover:text-slate-600"
                   )}
                 >
                   Receipts {receipts.length > 0 && `(${receipts.length})`}
@@ -864,7 +1120,7 @@ export default function App() {
                   onClick={() => setActiveTab('invoices')}
                   className={cn(
                     "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                    activeTab === 'invoices' ? "bg-white shadow-sm text-slate-900" : "text-slate-400 hover:text-slate-600"
+                    activeTab === 'invoices' ? "bg-white text-slate-900" : "text-slate-400 hover:text-slate-600"
                   )}
                 >
                   Invoices {invoices.length > 0 && `(${invoices.length})`}
@@ -882,7 +1138,7 @@ export default function App() {
                     placeholder={`Search ${activeTab}...`}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-6 text-sm font-bold shadow-sm focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-300"
+                    className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-6 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-300"
                   />
                 </div>
               )}
@@ -929,27 +1185,24 @@ export default function App() {
                             setCurrentReceipt(receipt);
                             setView('preview');
                           }}
-                          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-100 transition-all cursor-pointer group relative flex items-center justify-between"
+                          className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 hover:border-slate-300 active:bg-slate-50/80 transition-colors cursor-pointer group relative flex items-center justify-between"
                         >
-                          <div className="flex items-center gap-4">
-                            <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg", currentThemeText.replace('text-', 'bg-').replace('-600', '-50'), currentThemeText)}>
-                              {receipt.customerName ? receipt.customerName[0].toUpperCase() : 'C'}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-black text-slate-800 uppercase tracking-tighter">{receipt.customerName || 'Customer'}</h4>
-                                {receipt._synced && <Cloud size={10} className="text-blue-400" />}
+                          <div className="flex items-center min-w-0 pr-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="font-bold text-slate-800 uppercase tracking-tight text-xs sm:text-sm truncate">{receipt.customerName || 'Customer'}</h4>
+                                {receipt._synced && <Cloud size={10} className="text-blue-400 shrink-0" />}
                               </div>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              <p className="text-[9px] sm:text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
                                 {new Date(receipt.createdAt).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })} • {receipt.items.length} items
                               </p>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 pr-2">
+                          <div className="flex items-center gap-2 sm:gap-3 pr-1 shrink-0">
                              <div className="text-right">
-                                <p className="font-black text-slate-900 text-lg tracking-tighter">₦{receipt.total.toLocaleString()}</p>
-                                <p className="text-[8px] font-black uppercase text-slate-300 tracking-widest">{receipt.id.slice(0, 8)}</p>
+                                <p className="font-black text-slate-900 text-sm sm:text-base tracking-tight">₦{receipt.total.toLocaleString()}</p>
+                                <p className="text-[8px] font-bold uppercase text-slate-300 tracking-wider">{receipt.id.slice(0, 8)}</p>
                              </div>
 
                              <button
@@ -957,13 +1210,13 @@ export default function App() {
                                  e.stopPropagation();
                                  handleDuplicate('receipt', receipt);
                                }}
-                               className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                               className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
                                title="Duplicate Receipt"
                              >
-                               <Copy size={15} />
+                               <Copy size={14} />
                              </button>
 
-                             <ChevronRight className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-1 transition-all" size={18} strokeWidth={3} />
+                             <ChevronRight className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-1 transition-all" size={16} strokeWidth={2.5} />
                           </div>
                           
                           <button 
@@ -974,10 +1227,10 @@ export default function App() {
                                 handleDeleteReceipt(receipt.id);
                               }
                             }}
-                            className="absolute -right-8 group-hover:right-2 opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all active:scale-95"
+                            className="absolute -right-8 group-hover:right-2 opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all active:scale-95"
                             title="Delete Receipt"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       ))
@@ -994,26 +1247,23 @@ export default function App() {
                             setCurrentInvoice(invoice);
                             setView('preview_invoice');
                           }}
-                          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-100 transition-all cursor-pointer group relative flex items-center justify-between"
+                          className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 hover:border-slate-300 active:bg-slate-50/80 transition-colors cursor-pointer group relative flex items-center justify-between"
                         >
-                          <div className="flex items-center gap-4">
-                            <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg bg-blue-50 text-blue-600")}>
-                              {invoice.customerName ? invoice.customerName[0].toUpperCase() : 'C'}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-black text-slate-800 uppercase tracking-tighter">{invoice.customerName || 'Customer'}</h4>
-                                {invoice._synced && <Cloud size={10} className="text-blue-400" />}
+                          <div className="flex items-center min-w-0 pr-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="font-bold text-slate-800 uppercase tracking-tight text-xs sm:text-sm truncate">{invoice.customerName || 'Customer'}</h4>
+                                {invoice._synced && <Cloud size={10} className="text-blue-400 shrink-0" />}
                               </div>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              <p className="text-[9px] sm:text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
                                 {invoice.invoiceNumber} • DU {new Date(invoice.dueDate).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}
                               </p>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 md:gap-3 pr-2">
+                          <div className="flex items-center gap-2 sm:gap-3 pr-1 shrink-0">
                              <div className="text-right">
-                                <p className="font-black text-slate-900 text-lg tracking-tighter">₦{invoice.total.toLocaleString()}</p>
+                                <p className="font-black text-slate-900 text-sm sm:text-base tracking-tight">₦{invoice.total.toLocaleString()}</p>
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -1035,7 +1285,7 @@ export default function App() {
                                    e.stopPropagation();
                                    handleConvertInvoiceToReceipt(invoice);
                                  }}
-                                 className="px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all"
+                                 className="px-2 py-0.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all"
                                  title="Issue Receipt for this Invoice"
                                >
                                  + Receipt
@@ -1046,14 +1296,14 @@ export default function App() {
                                    e.stopPropagation();
                                    handleDuplicate('invoice', invoice);
                                  }}
-                                 className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
                                  title="Duplicate Invoice"
                                >
-                                 <Copy size={15} />
+                                 <Copy size={14} />
                                </button>
                              </div>
 
-                             <ChevronRight className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-1 transition-all" size={18} strokeWidth={3} />
+                             <ChevronRight className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-1 transition-all" size={16} strokeWidth={2.5} />
                           </div>
                           
                           <button 
@@ -1064,10 +1314,10 @@ export default function App() {
                                 handleDeleteInvoice(invoice.id);
                               }
                             }}
-                            className="absolute -right-8 group-hover:right-2 opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all active:scale-95"
+                            className="absolute -right-8 group-hover:right-2 opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all active:scale-95"
                             title="Delete Invoice"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       ))
@@ -1078,7 +1328,7 @@ export default function App() {
 
               {/* Cloud Sync Upsell */}
               {!user && (
-                <div className="bg-blue-600 rounded-[2rem] p-6 text-white relative overflow-hidden shadow-xl shadow-blue-100 mt-4">
+                <div className="bg-blue-600 rounded-[2rem] p-6 text-white relative overflow-hidden mt-4">
                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
                    <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div className="space-y-1 text-center sm:text-left">
@@ -1121,7 +1371,7 @@ export default function App() {
                     onClick={() => setView('create')}
                     className={cn(
                       "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                      view === 'create' ? "bg-white shadow-md text-blue-600" : "text-slate-400 hover:text-slate-600"
+                      view === 'create' ? "bg-white border border-slate-200 text-blue-600 font-bold" : "text-slate-400 hover:text-slate-600"
                     )}
                     style={view === 'create' ? { color: 'var(--theme-primary, #2563eb)' } : {}}
                   >
@@ -1134,7 +1384,7 @@ export default function App() {
                     onClick={() => setView('create_invoice')}
                     className={cn(
                       "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                      view === 'create_invoice' ? "bg-white shadow-md text-blue-600" : "text-slate-400 hover:text-slate-600"
+                      view === 'create_invoice' ? "bg-white border border-slate-200 text-blue-600 font-bold" : "text-slate-400 hover:text-slate-600"
                     )}
                     style={view === 'create_invoice' ? { color: 'var(--theme-primary, #2563eb)' } : {}}
                   >
@@ -1177,7 +1427,7 @@ export default function App() {
                          className={cn(
                            "py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
                            businessInfo?.template === t 
-                             ? "bg-white shadow-sm text-slate-900 border border-slate-200" 
+                             ? "bg-white text-slate-900 border border-slate-200 font-bold" 
                              : "text-slate-400 hover:text-slate-600"
                          )}
                        >
@@ -1187,8 +1437,8 @@ export default function App() {
                    </div>
                  </div>
 
-                 <div className={cn("bg-slate-200 rounded-2xl flex flex-col items-center justify-center min-h-[500px]", (view === 'create_invoice' || view === 'preview_invoice') ? "p-4" : "p-8")}>
-                    <div className={cn("overflow-hidden shadow-2xl rounded-sm w-full mx-auto", (view === 'create_invoice' || view === 'preview_invoice') ? "max-w-[850px]" : "max-w-[320px]")}>
+                  <div className={cn("bg-slate-200 rounded-2xl flex flex-col items-center justify-center min-h-[500px]", (view === 'create_invoice' || view === 'preview_invoice') ? "p-4" : "p-8")}>
+                    <div className={cn("overflow-hidden border border-slate-300/80 rounded-sm w-full mx-auto", (view === 'create_invoice' || view === 'preview_invoice') ? "max-w-[850px]" : "max-w-[320px]")}>
                       {view === 'create' ? (
                         currentReceipt && businessInfo && (
                           <ReceiptPreview 
@@ -1235,35 +1485,45 @@ export default function App() {
                   view === 'preview_invoice' ? "p-4 md:p-6 lg:p-8" : "p-6 md:p-10"
                 )}>
                   {(view === 'preview' ? currentReceipt?._synced : currentInvoice?._synced) && (
-                    <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 bg-emerald-500 text-white px-3 py-1 rounded-full shadow-lg animate-in fade-in zoom-in duration-300">
+                    <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 bg-emerald-500 text-white px-3 py-1 rounded-full border border-white/20 animate-in fade-in zoom-in duration-300">
                       <Cloud size={12} className="fill-white/20" />
                       <span className="text-[10px] font-black uppercase tracking-widest">Saved to Cloud</span>
                     </div>
                   )}
                   <div className={cn(
-                    "overflow-hidden shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)] rounded-sm w-full",
-                    view === 'preview_invoice' ? "max-w-[850px]" : "max-w-[340px]"
+                    "w-full",
+                    view === 'preview_invoice' ? "overflow-x-auto preview-scroll pb-2" : ""
                   )}>
-                    {view === 'preview' && currentReceipt ? (
-                      <ReceiptPreview 
-                        ref={exportRef}
-                        receipt={currentReceipt} 
-                        business={businessInfo!} 
-                      />
-                    ) : (
-                      currentInvoice && (
-                        <InvoicePreview 
+                    {view === 'preview_invoice' && (
+                      <div className="md:hidden flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 py-1 bg-white/70 backdrop-blur rounded-lg border border-slate-300">
+                        <span>← Swipe horizontally to preview full invoice →</span>
+                      </div>
+                    )}
+                    <div className={cn(
+                      "overflow-hidden border border-slate-300/80 rounded-sm mx-auto",
+                      view === 'preview_invoice' ? "min-w-[760px] md:min-w-0 max-w-[850px]" : "max-w-[340px]"
+                    )}>
+                      {view === 'preview' && currentReceipt ? (
+                        <ReceiptPreview 
                           ref={exportRef}
-                          invoice={currentInvoice} 
+                          receipt={currentReceipt} 
                           business={businessInfo!} 
                         />
-                      )
-                    )}
+                      ) : (
+                        currentInvoice && (
+                          <InvoicePreview 
+                            ref={exportRef}
+                            invoice={currentInvoice} 
+                            business={businessInfo!} 
+                          />
+                        )
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {/* Quick Template Switcher */}
-                <div className="grid grid-cols-3 gap-2 p-1 bg-white border border-slate-200 rounded-xl shadow-sm">
+                <div className="grid grid-cols-3 gap-2 p-1 bg-white border border-slate-200 rounded-xl">
                   {(['classic', 'modern', 'minimal'] as const).map((t) => (
                     <button
                       key={t}
@@ -1285,7 +1545,7 @@ export default function App() {
                 "w-full flex flex-col gap-4 text-[#000033]",
                 view === 'preview_invoice' ? "lg:w-[350px] shrink-0" : "md:w-5/12"
               )}>
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200">
                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Export Options</h3>
                    
                    <div className="mb-6 space-y-2">
@@ -1300,37 +1560,65 @@ export default function App() {
                    </div>
 
                   <div className="space-y-3">
+                      {exportFeedback && (
+                        <div className="flex items-center justify-center gap-2 p-2 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold animate-pulse">
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span>{exportFeedback}</span>
+                        </div>
+                      )}
+
                       {/* Direct WhatsApp Share */}
                       <button
                         onClick={() => handleWhatsAppShare(view === 'preview' ? 'receipt' : 'invoice')}
-                        className="w-full flex items-center justify-center gap-2.5 bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-emerald-600/20 text-sm"
+                        className="w-full flex items-center justify-center gap-2.5 bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-xl font-bold transition-all active:scale-95 text-sm min-h-[48px]"
                       >
                         <MessageCircle size={18} />
-                        Share via WhatsApp
+                        Share Summary on WhatsApp
                       </button>
 
+                      {/* Native Share Sheet (PDF Attachment) */}
                       <button
-                        onClick={() => shareReceipt(view === 'preview' ? 'receipt' : 'invoice')}
-                        className={cn("w-full flex items-center justify-center gap-2.5 text-white py-3 rounded-xl font-bold transition-all active:scale-95 shadow-md text-sm", getThemeColorClass())}
+                        disabled={isExporting}
+                        onClick={() => handleShareDocument('pdf', view === 'preview' ? 'receipt' : 'invoice')}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-2.5 text-white py-3.5 rounded-xl font-bold transition-all active:scale-95 text-sm min-h-[48px] disabled:opacity-60",
+                          getThemeColorClass()
+                        )}
                       >
-                        <Share2 size={18} />
-                        Share Image Link
+                        {isExporting ? (
+                          <RefreshCw size={18} className="animate-spin" />
+                        ) : (
+                          <Share2 size={18} />
+                        )}
+                        Share PDF Document
+                      </button>
+
+                      {/* Native Share Sheet (Image Attachment) */}
+                      <button
+                        disabled={isExporting}
+                        onClick={() => handleShareDocument('png', view === 'preview' ? 'receipt' : 'invoice')}
+                        className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 py-3 rounded-xl font-bold transition-all active:scale-95 text-xs min-h-[44px] disabled:opacity-60"
+                      >
+                        <Share2 size={15} />
+                        Share Image Document (PNG)
                       </button>
                       
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 gap-3 pt-1">
                         <button
-                          onClick={() => downloadReceipt('png', view === 'preview' ? 'receipt' : 'invoice')}
-                          className="flex items-center justify-center gap-2 bg-white text-slate-900 py-3 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition-all text-xs shadow-sm"
+                          disabled={isExporting}
+                          onClick={() => handleDownloadDocument('png', view === 'preview' ? 'receipt' : 'invoice')}
+                          className="flex items-center justify-center gap-2 bg-white text-slate-900 py-3 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-all text-xs min-h-[44px] disabled:opacity-60"
                         >
                           <Download size={16} />
-                          PNG
+                          Save PNG
                         </button>
                         <button
-                          onClick={() => downloadReceipt('pdf', view === 'preview' ? 'receipt' : 'invoice')}
-                          className="flex items-center justify-center gap-2 bg-white text-slate-900 py-3 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition-all text-xs shadow-sm"
+                          disabled={isExporting}
+                          onClick={() => handleDownloadDocument('pdf', view === 'preview' ? 'receipt' : 'invoice')}
+                          className="flex items-center justify-center gap-2 bg-white text-slate-900 py-3 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-all text-xs min-h-[44px] disabled:opacity-60"
                         >
                           <Download size={16} />
-                          PDF
+                          Save PDF
                         </button>
                       </div>
 
@@ -1403,7 +1691,7 @@ export default function App() {
                           onClick={() => view === 'preview' ? handleSaveToCloud(currentReceipt!) : handleSaveInvoiceToCloud(currentInvoice!)}
                           className={cn(
                             "w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black uppercase text-[10px] tracking-wider transition-all active:scale-[0.98]",
-                            "bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 shadow-sm"
+                            "bg-white border border-slate-200 text-slate-800 hover:bg-slate-50"
                           )}
                         >
                           {isSaving ? (
@@ -1452,10 +1740,23 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      <footer className="p-8 text-center bg-slate-100/50">
-        <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-1">Secure Digital Records</p>
-        <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">© 2026 QUICK RECIEPT · ENTERPRISE EDITION</p>
-      </footer>
+      {/* Fixed Mobile Bottom Navigation Bar (5 icons with center damping scoop) */}
+      <BottomNav
+        activeView={view}
+        onNavigate={(target) => setView(target)}
+        onCreateReceipt={() => {
+          setReceiptInitialData(null);
+          setCurrentReceipt(null);
+          setView('create');
+        }}
+        onCreateInvoice={() => {
+          setInvoiceInitialData(null);
+          setCurrentInvoice(null);
+          setView('create_invoice');
+        }}
+        themeColor={businessInfo?.themeColor || 'blue'}
+        hasUser={!!user}
+      />
 
       {/* Auth Modal */}
       <AuthModal 

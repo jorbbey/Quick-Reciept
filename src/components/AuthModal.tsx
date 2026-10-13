@@ -129,12 +129,12 @@ export default function AuthModal({
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-200"
+          className="bg-white w-full max-w-md rounded-[2rem] overflow-hidden border border-slate-200"
         >
           <div className="p-6 md:p-8 space-y-6">
             <div className="flex items-center justify-between">
               <div className={cn(
-                "w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm",
+                "w-12 h-12 rounded-2xl flex items-center justify-center",
                 reason === 'limit_reached' && mode === 'signup' 
                   ? "bg-amber-50 text-amber-600" 
                   : "bg-blue-50 text-blue-600"
@@ -172,7 +172,7 @@ export default function AuthModal({
               ) : mode === 'signup' ? (
                 <>
                   <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">
-                    Create Free Account
+                    Create Account
                   </h2>
                   <p className="text-slate-500 text-xs md:text-sm font-medium leading-relaxed">
                     Keep your receipts, invoices, and business profile safely stored in the cloud.
@@ -268,7 +268,7 @@ export default function AuthModal({
                   disabled={loading}
                   type="submit"
                   className={cn(
-                    "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2 shadow-lg",
+                    "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2",
                     "bg-slate-900 text-white hover:bg-slate-800 active:scale-[0.98]",
                     loading && "opacity-70 cursor-not-allowed"
                   )}
@@ -277,7 +277,7 @@ export default function AuthModal({
                     <Loader2 className="animate-spin" size={18} />
                   ) : (
                     <>
-                      <span>Create Free Account</span>
+                      <span>Create Account</span>
                       <ArrowRight size={16} />
                     </>
                   )}
@@ -351,7 +351,7 @@ export default function AuthModal({
                   disabled={loading}
                   type="submit"
                   className={cn(
-                    "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2 shadow-lg",
+                    "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2",
                     "bg-slate-900 text-white hover:bg-slate-800 active:scale-[0.98]",
                     loading && "opacity-70 cursor-not-allowed"
                   )}
@@ -375,7 +375,7 @@ export default function AuthModal({
                     }}
                     className="text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors"
                   >
-                    Don't have an account? <span className="text-blue-600 font-black">Create free account</span>
+                    Don't have an account? <span className="text-blue-600 font-black">Create account</span>
                   </button>
                 </div>
               </form>
@@ -405,7 +405,7 @@ export default function AuthModal({
                   disabled={loading || resetSuccess}
                   type="submit"
                   className={cn(
-                    "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2 shadow-lg",
+                    "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2",
                     "bg-slate-900 text-white hover:bg-slate-800 active:scale-[0.98]",
                     (loading || resetSuccess) && "opacity-70 cursor-not-allowed"
                   )}

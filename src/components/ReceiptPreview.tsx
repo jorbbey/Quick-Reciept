@@ -30,8 +30,8 @@ const ReceiptPreview = forwardRef<HTMLDivElement, ReceiptPreviewProps>(({ receip
       ref={ref} 
       className={cn(
         "bg-white w-full max-w-full mx-auto relative overflow-hidden flex flex-col transition-all duration-500",
-        isMinimal ? "p-4 md:p-8 font-sans text-slate-600 space-y-6 shadow-sm" : 
-        isModern ? "p-0 font-sans text-slate-800 shadow-md" : 
+        isMinimal ? "p-4 md:p-8 font-sans text-slate-600 space-y-6" : 
+        isModern ? "p-0 font-sans text-slate-800" : 
         "px-8 py-10 font-mono text-slate-800"
       )}
       style={{ minHeight: isModern ? '600px' : '520px' }}
@@ -44,7 +44,7 @@ const ReceiptPreview = forwardRef<HTMLDivElement, ReceiptPreviewProps>(({ receip
           
           <div className="relative z-10 text-center">
             {business.logo ? (
-              <img src={business.logo} alt={business.name} className="w-16 h-16 object-contain mx-auto mb-2 filter drop-shadow-md" />
+              <img src={business.logo} alt={business.name} className="w-16 h-16 object-contain mx-auto mb-2" />
             ) : (
               <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-2 border border-white/30">
                 <NairaIcon size={24} />
