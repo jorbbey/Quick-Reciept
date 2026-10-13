@@ -106,6 +106,27 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  // Search and 5-item limit for recent documents
+  const isSearching = searchQuery.trim().length > 0;
+  const searchLower = searchQuery.toLowerCase().trim();
+
+  const filteredReceipts = receipts.filter(r => 
+    r.customerName.toLowerCase().includes(searchLower) || 
+    r.id.toLowerCase().includes(searchLower) ||
+    r.items.some(item => item.name.toLowerCase().includes(searchLower))
+  );
+  // Only the most recent 5 in one go, the rest shown when searched
+  const displayedReceipts = isSearching ? filteredReceipts : filteredReceipts.slice(0, 5);
+
+  const filteredInvoices = invoices.filter(i => 
+    i.customerName.toLowerCase().includes(searchLower) || 
+    i.invoiceNumber.toLowerCase().includes(searchLower) ||
+    i.id.toLowerCase().includes(searchLower) ||
+    i.items.some(item => item.name.toLowerCase().includes(searchLower))
+  );
+  // Only the most recent 5 in one go, the rest shown when searched
+  const displayedInvoices = isSearching ? filteredInvoices : filteredInvoices.slice(0, 5);
+
   // Form pre-fill memory state
   const [receiptInitialData, setReceiptInitialData] = useState<Partial<Receipt> | null>(null);
   const [invoiceInitialData, setInvoiceInitialData] = useState<Partial<Invoice> | null>(null);
@@ -695,15 +716,11 @@ export default function App() {
         setEntranceScreen('main');
         await syncHistory();
       } else {
-        // No authenticated session. Check if returning anonymous user
-        const isReturningAnonymous = hasCompletedEntrance || Boolean(businessInfo?.name) || receipts.length > 0 || invoices.length > 0;
-        if (isReturningAnonymous) {
-          setHasCompletedEntrance(true);
-          setEntranceScreen('main');
-        } else {
-          // First time user: show Welcome screen
-          setEntranceScreen('welcome');
-        }
+        // No authenticated session (logged-out or expired session):
+        // Reload starts from splash screen (which just ran), then transitions to welcome screen to start over
+        setUser(null);
+        setHasCompletedEntrance(false);
+        setEntranceScreen('welcome');
       }
     } catch (err: any) {
       console.error('Initialization error:', err);
@@ -717,13 +734,19 @@ export default function App() {
     let subscription: { unsubscribe: () => void } | null = null;
     if (supabase) {
       try {
-        const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data } = supabase.auth.onAuthStateChange((event, session) => {
           const newUser = session?.user || null;
           setUser(newUser);
           if (newUser) {
             setHasCompletedEntrance(true);
             setEntranceScreen('main');
             syncHistory();
+          } else if (event === 'SIGNED_OUT') {
+            // After logout or session expiration: take back to welcome screen to start over
+            setUser(null);
+            setHasCompletedEntrance(false);
+            setView('dashboard');
+            setEntranceScreen('welcome');
           }
         });
         subscription = data?.subscription || null;
@@ -745,6 +768,19 @@ export default function App() {
       subscription?.unsubscribe?.();
     };
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+    } catch (e) {
+      console.error('Sign out error:', e);
+    }
+    setUser(null);
+    setHasCompletedEntrance(false);
+    setView('dashboard');
+    setEntranceScreen('welcome');
+    trackEvent('user_logged_out');
+  };
 
   const handleEntranceSuccess = async (authenticatedUser: SupabaseUser | null) => {
     setHasCompletedEntrance(true);
@@ -904,8 +940,8 @@ export default function App() {
         <div className="flex items-center gap-2">
           {user ? (
             <button 
-              onClick={() => signOut()}
-              className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-red-600 flex items-center gap-1.5"
+              onClick={handleLogout}
+              className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-red-600 flex items-center gap-1.5 cursor-pointer"
               title={`Logged in as ${user.email} (Tap to logout)`}
             >
               <LogOut size={16} />
@@ -926,7 +962,7 @@ export default function App() {
       </div>
 
       <main className={cn(
-        "flex-1 p-3 md:p-6 mx-auto w-full transition-all duration-300",
+        "flex-1 p-3 md:p-6 mx-auto w-full transition-all duration-300 pb-36 sm:pb-40",
         view === 'stats' ? "max-w-[1400px]" : (view === 'create_invoice' || view === 'preview_invoice') ? "max-w-7xl" : (view === 'create' || view === 'preview') ? "max-w-6xl" : "max-w-2xl"
       )}>
         <AnimatePresence mode="wait">
@@ -993,10 +1029,7 @@ export default function App() {
                   setAuthReason('manual');
                   setIsAuthModalOpen(true);
                 }}
-                onSignOut={async () => {
-                  await signOut();
-                  setUser(null);
-                }}
+                onSignOut={handleLogout}
                 receipts={receipts}
                 invoices={invoices}
               />
@@ -1144,7 +1177,7 @@ export default function App() {
               )}
 
               {/* History */}
-              <div className="space-y-3 pb-8">
+              <div className="space-y-3 pb-16 mb-12">
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2 text-slate-400">
                     <History size={16} />
@@ -1164,21 +1197,26 @@ export default function App() {
                     {activeTab === 'invoices' && (
                       <button 
                         onClick={() => setView('create_invoice')}
-                        className="text-[9px] font-black uppercase text-blue-500 hover:underline"
+                        className="text-[9px] font-black uppercase text-blue-500 hover:underline cursor-pointer"
                       >
                         + Create an Invoice
                       </button>
                     )}
                   </div>
+                ) : isSearching && (activeTab === 'receipts' ? displayedReceipts.length === 0 : displayedInvoices.length === 0) ? (
+                  <div className="text-center py-12 bg-slate-50/80 rounded-2xl border border-slate-200/80">
+                    <p className="text-slate-600 font-bold text-xs">No {activeTab} matching "{searchQuery}"</p>
+                    <button 
+                      onClick={() => setSearchQuery('')}
+                      className="mt-2 text-[10px] font-black uppercase text-blue-600 hover:underline cursor-pointer"
+                    >
+                      Clear search
+                    </button>
+                  </div>
                 ) : (
                   <div className="grid gap-3">
                     {activeTab === 'receipts' ? (
-                      receipts
-                        .filter(r => 
-                          r.customerName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          r.items.some(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                        )
-                        .map((receipt) => (
+                      displayedReceipts.map((receipt) => (
                         <div 
                           key={receipt.id}
                           onClick={() => {
@@ -1235,12 +1273,7 @@ export default function App() {
                         </div>
                       ))
                     ) : (
-                      invoices
-                        .filter(i => 
-                          i.customerName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          i.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase())
-                        )
-                        .map((invoice) => (
+                      displayedInvoices.map((invoice) => (
                         <div 
                           key={invoice.id}
                           onClick={() => {
@@ -1270,7 +1303,7 @@ export default function App() {
                                     handleToggleInvoiceStatus(invoice);
                                   }}
                                   className={cn(
-                                    "text-[8px] font-black uppercase px-2 py-0.5 rounded-full hover:scale-105 transition-transform",
+                                    "text-[8px] font-black uppercase px-2 py-0.5 rounded-full hover:scale-105 transition-transform cursor-pointer",
                                     invoice.status === 'paid' ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"
                                   )}
                                   title="Click to toggle Paid/Pending"
@@ -1285,9 +1318,9 @@ export default function App() {
                                    e.stopPropagation();
                                    handleConvertInvoiceToReceipt(invoice);
                                  }}
-                                 className="px-2 py-0.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all"
+                                 className="px-2 py-0.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer"
                                  title="Issue Receipt for this Invoice"
-                               >
+                                >
                                  + Receipt
                                </button>
 
@@ -1296,7 +1329,7 @@ export default function App() {
                                    e.stopPropagation();
                                    handleDuplicate('invoice', invoice);
                                  }}
-                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
                                  title="Duplicate Invoice"
                                >
                                  <Copy size={14} />
@@ -1321,6 +1354,15 @@ export default function App() {
                           </button>
                         </div>
                       ))
+                    )}
+
+                    {/* Hint when not searching and more than 5 items exist */}
+                    {!isSearching && (activeTab === 'receipts' ? receipts.length > 5 : invoices.length > 5) && (
+                      <div className="pt-2 text-center">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Showing 5 most recent • Search above to view all {activeTab === 'receipts' ? receipts.length : invoices.length}
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1738,6 +1780,8 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        {/* Space after last recent item so dock has generous clearance */}
+        <div className="h-20 w-full shrink-0 select-none pointer-events-none" aria-hidden="true" />
       </main>
 
       {/* Fixed Mobile Bottom Navigation Bar (5 icons with center damping scoop) */}

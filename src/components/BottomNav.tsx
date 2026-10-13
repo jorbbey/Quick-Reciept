@@ -143,14 +143,15 @@ export default function BottomNav({
       {/* Fixed Bottom Dock Nav */}
       <nav 
         aria-label="Bottom Navigation"
-        className="fixed bottom-0 inset-x-0 z-40 bg-white select-none"
+        className="fixed bottom-0 inset-x-0 z-40 bg-white select-none shadow-none border-none outline-none mt-8"
+        style={{ boxShadow: 'none', WebkitBoxShadow: 'none', filter: 'none' }}
       >
-        {/* Top Edge with Damped / Concave Scoop for the Center Button */}
-        <div className="w-full relative h-[18px] flex items-end">
-          {/* Left flat border */}
-          <div className="flex-1 h-0 border-t border-slate-200" />
+        {/* Top Edge with Damped / Concave Scoop for the Center Button (No top border line or box shadow) */}
+        <div className="w-full relative h-[18px] flex items-end select-none">
+          {/* Left flat section (no border/shadow) */}
+          <div className="flex-1 h-0 border-none" />
 
-          {/* Center SVG Notch (dips down into the dock) */}
+          {/* Center SVG Notch (dips down into the dock, seamless pure white fill without stroke/shadow) */}
           <div className="w-[96px] h-[18px] shrink-0 relative overflow-visible">
             <svg 
               width="96" 
@@ -159,24 +160,18 @@ export default function BottomNav({
               fill="none" 
               className="absolute top-0 left-0 w-full h-full"
               preserveAspectRatio="none"
+              style={{ filter: 'none' }}
             >
               {/* White background fill seamlessly closing the dock body */}
               <path 
                 d="M 0 0 C 22 0, 26 18, 48 18 C 70 18, 74 0, 96 0 L 96 18 L 0 18 Z" 
                 fill="#FFFFFF" 
               />
-              {/* Damping border curve */}
-              <path 
-                d="M 0 0.5 C 22 0.5, 26 17.5, 48 17.5 C 70 17.5, 74 0.5, 96 0.5" 
-                stroke="#E2E8F0" 
-                strokeWidth="1.2" 
-                fill="none" 
-              />
             </svg>
           </div>
 
-          {/* Right flat border */}
-          <div className="flex-1 h-0 border-t border-slate-200" />
+          {/* Right flat section (no border/shadow) */}
+          <div className="flex-1 h-0 border-none" />
         </div>
 
         {/* Navigation Content Bar */}
